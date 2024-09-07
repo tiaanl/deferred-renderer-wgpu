@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 bytemuck = { version = "1.17.1", features = ["derive"] }
 cgmath = "0.18.0"
+image = { version = "0.25.2", default-features = false, features = ["png"] }
+obj-rs = "0.7.2"
 pollster = "0.3.0"
 wgpu = "22.1.0"
 winit = "0.30.5"

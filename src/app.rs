@@ -1,10 +1,13 @@
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    io::{BufReader, Cursor},
+};
 
 use cgmath::{Matrix, Rotation3, SquareMatrix};
 use winit::keyboard::KeyCode;
 
 use crate::{
-    mesh::{GpuMesh, Mesh, Vertex},
+    mesh::{GpuMesh, Mesh},
     mesh_render_pipeline::MeshRenderPipeline,
     texture::{create_depth_texture, create_fullscreen_texture, Texture},
     Renderer,
@@ -22,10 +25,13 @@ pub struct App {
     mesh_render_pipeline: MeshRenderPipeline,
 
     mesh: GpuMesh,
+    // albedo_texture: Texture,
+    // normal_texture: Texture,
+    material_bind_group: wgpu::BindGroup,
 
-    albedo_texture: Texture,
-    position_texture: Texture,
-    normal_texture: Texture,
+    albedo_g_texture: Texture,
+    position_g_texture: Texture,
+    normal_g_texture: Texture,
 
     fullscreen_render_pipeline: wgpu::RenderPipeline,
     fullscreen_bind_group_layout: wgpu::BindGroupLayout,
@@ -61,10 +67,10 @@ impl App {
 
         let depth_texture =
             create_depth_texture(device, surface_config.width, surface_config.height);
-        let albedo_texture = create_fullscreen_texture(device, surface_config, "albedo texture");
-        let position_texture =
+        let albedo_g_texture = create_fullscreen_texture(device, surface_config, "albedo texture");
+        let position_g_texture =
             create_fullscreen_texture(device, surface_config, "position texture");
-        let normal_texture = create_fullscreen_texture(device, surface_config, "normal texture");
+        let normal_g_texture = create_fullscreen_texture(device, surface_config, "normal texture");
 
         let uniforms_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -97,119 +103,94 @@ impl App {
             }],
         });
 
-        let mesh_render_pipeline = MeshRenderPipeline::new(renderer, &uniforms_bind_group_layout);
+        let albedo_texture = Texture::from_reader(
+            renderer,
+            BufReader::new(Cursor::new(include_bytes!("../res/metal/albedo.png"))),
+        )
+        .unwrap();
 
-        let mut mesh = Mesh::default();
+        let normal_texture = Texture::from_reader(
+            renderer,
+            BufReader::new(Cursor::new(include_bytes!("../res/metal/normal.png"))),
+        )
+        .unwrap();
 
-        const MIN: cgmath::Vector3<f32> = cgmath::vec3(-0.5, -0.5, -0.5);
-        const MAX: cgmath::Vector3<f32> = cgmath::vec3(0.5, 0.5, 0.5);
+        let material_bind_group_layout =
+            renderer
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("material binding group layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ],
+                });
 
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MIN.y, MAX.z, 0.0, 0.0, 1.0, 0.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MIN.y, MAX.z, 0.0, 0.0, 1.0, 1.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MAX.y, MAX.z, 0.0, 0.0, 1.0, 1.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MAX.y, MAX.z, 0.0, 0.0, 1.0, 0.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MAX.y, MIN.z, 0.0, 0.0, -1.0, 1.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MAX.y, MIN.z, 0.0, 0.0, -1.0, 0.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MIN.y, MIN.z, 0.0, 0.0, -1.0, 0.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MIN.y, MIN.z, 0.0, 0.0, -1.0, 1.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MIN.y, MIN.z, 1.0, 0.0, 0.0, 0.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MAX.y, MIN.z, 1.0, 0.0, 0.0, 1.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MAX.y, MAX.z, 1.0, 0.0, 0.0, 1.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MIN.y, MAX.z, 1.0, 0.0, 0.0, 0.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MIN.y, MAX.z, -1.0, 0.0, 0.0, 1.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MAX.y, MAX.z, -1.0, 0.0, 0.0, 0.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MAX.y, MIN.z, -1.0, 0.0, 0.0, 0.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MIN.y, MIN.z, -1.0, 0.0, 0.0, 1.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MAX.y, MIN.z, 0.0, 1.0, 0.0, 1.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MAX.y, MIN.z, 0.0, 1.0, 0.0, 0.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MAX.y, MAX.z, 0.0, 1.0, 0.0, 0.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MAX.y, MAX.z, 0.0, 1.0, 0.0, 1.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MIN.y, MAX.z, 0.0, -1.0, 0.0, 0.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MIN.y, MAX.z, 0.0, -1.0, 0.0, 1.0, 0.0));
-        mesh.vertices
-            .push(Vertex::raw(MIN.x, MIN.y, MIN.z, 0.0, -1.0, 0.0, 1.0, 1.0));
-        mesh.vertices
-            .push(Vertex::raw(MAX.x, MIN.y, MIN.z, 0.0, -1.0, 0.0, 0.0, 1.0));
+        let material_bind_group = renderer
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("material bind_group"),
+                layout: &material_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&albedo_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&albedo_texture.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&normal_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(&normal_texture.sampler),
+                    },
+                ],
+            });
 
-        /*
-        const VERTICES: &[[f32; 8]] = &[
-            // Front
-            [MIN.x, MIN.y, MAX.z, 0.0, 0.0, 1.0, 0.0, 0.0], //
-            [MAX.x, MIN.y, MAX.z, 0.0, 0.0, 1.0, 1.0, 0.0], //
-            [MAX.x, MAX.y, MAX.z, 0.0, 0.0, 1.0, 1.0, 1.0], //
-            [MIN.x, MAX.y, MAX.z, 0.0, 0.0, 1.0, 0.0, 1.0], //
-            // Back
-            [MIN.x, MAX.y, MIN.z, 0.0, 0.0, -1.0, 1.0, 0.0], //
-            [MAX.x, MAX.y, MIN.z, 0.0, 0.0, -1.0, 0.0, 0.0], //
-            [MAX.x, MIN.y, MIN.z, 0.0, 0.0, -1.0, 0.0, 1.0], //
-            [MIN.x, MIN.y, MIN.z, 0.0, 0.0, -1.0, 1.0, 1.0], //
-            // Right
-            [MAX.x, MIN.y, MIN.z, 1.0, 0.0, 0.0, 0.0, 0.0], //
-            [MAX.x, MAX.y, MIN.z, 1.0, 0.0, 0.0, 1.0, 0.0], //
-            [MAX.x, MAX.y, MAX.z, 1.0, 0.0, 0.0, 1.0, 1.0], //
-            [MAX.x, MIN.y, MAX.z, 1.0, 0.0, 0.0, 0.0, 1.0], //
-            // Left
-            [MIN.x, MIN.y, MAX.z, -1.0, 0.0, 0.0, 1.0, 0.0], //
-            [MIN.x, MAX.y, MAX.z, -1.0, 0.0, 0.0, 0.0, 0.0], //
-            [MIN.x, MAX.y, MIN.z, -1.0, 0.0, 0.0, 0.0, 1.0], //
-            [MIN.x, MIN.y, MIN.z, -1.0, 0.0, 0.0, 1.0, 1.0], //
-            // Top
-            [MAX.x, MAX.y, MIN.z, 0.0, 1.0, 0.0, 1.0, 0.0], //
-            [MIN.x, MAX.y, MIN.z, 0.0, 1.0, 0.0, 0.0, 0.0], //
-            [MIN.x, MAX.y, MAX.z, 0.0, 1.0, 0.0, 0.0, 1.0], //
-            [MAX.x, MAX.y, MAX.z, 0.0, 1.0, 0.0, 1.0, 1.0], //
-            // Bottom
-            [MAX.x, MIN.y, MAX.z, 0.0, -1.0, 0.0, 0.0, 0.0], //
-            [MIN.x, MIN.y, MAX.z, 0.0, -1.0, 0.0, 1.0, 0.0], //
-            [MIN.x, MIN.y, MIN.z, 0.0, -1.0, 0.0, 1.0, 1.0], //
-            [MAX.x, MIN.y, MIN.z, 0.0, -1.0, 0.0, 0.0, 1.0], //
-        ];
-        */
+        let mesh_render_pipeline = MeshRenderPipeline::new(
+            renderer,
+            &uniforms_bind_group_layout,
+            &material_bind_group_layout,
+        );
 
-        mesh.indices.append(&mut vec![
-            0, 1, 2, 2, 3, 0, // front
-            4, 5, 6, 6, 7, 4, // back
-            8, 9, 10, 10, 11, 8, // right
-            12, 13, 14, 14, 15, 12, // left
-            16, 17, 18, 18, 19, 16, // top
-            20, 21, 22, 22, 23, 20, // bottom
-        ]);
-
+        let reader =
+            std::io::BufReader::new(std::io::Cursor::new(include_bytes!("../res/cube.obj")));
+        let mesh = Mesh::from_reader(reader).unwrap();
         let mesh = mesh.upload_to_gpu(renderer);
-
-        // let main_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("main index buffer"),
-        //     contents: bytemuck::cast_slice(VERTICES),
-        //     usage: wgpu::BufferUsages::VERTEX,
-        // });
-
-        // let main_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("main index buffer"),
-        //     contents: bytemuck::cast_slice(INDICES),
-        //     usage: wgpu::BufferUsages::INDEX,
-        // });
 
         let fullscreen_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("fullscreen shader module"),
@@ -276,10 +257,15 @@ impl App {
         Self {
             depth_texture,
             mesh_render_pipeline,
+
             mesh,
-            albedo_texture,
-            position_texture,
-            normal_texture,
+            // albedo_texture,
+            // normal_texture,
+            material_bind_group,
+
+            albedo_g_texture,
+            position_g_texture,
+            normal_g_texture,
             fullscreen_render_pipeline,
             fullscreen_bind_group_layout,
             uniforms_buffer,
@@ -304,10 +290,10 @@ impl App {
 
         self.depth_texture =
             create_depth_texture(device, surface_config.width, surface_config.height);
-        self.albedo_texture = create_fullscreen_texture(device, surface_config, "albedo texture");
-        self.position_texture =
+        self.albedo_g_texture = create_fullscreen_texture(device, surface_config, "albedo texture");
+        self.position_g_texture =
             create_fullscreen_texture(device, surface_config, "position texture");
-        self.normal_texture = create_fullscreen_texture(device, surface_config, "normal texture");
+        self.normal_g_texture = create_fullscreen_texture(device, surface_config, "normal texture");
     }
 
     pub fn on_mouse_down(&mut self, button: winit::event::MouseButton) {
@@ -371,7 +357,7 @@ impl App {
         let projection_matrix = cgmath::perspective(cgmath::Deg(45.0), aspect_ratio, 0.1, 1000.0);
         let projection_inv_matrix = projection_matrix.invert().unwrap().transpose();
 
-        let distance = 4.0;
+        let distance = 5.0;
         let view_matrix = {
             let yaw_quat = cgmath::Quaternion::from_angle_y(cgmath::Deg(self.yaw));
             let pitch_quat = cgmath::Quaternion::from_angle_x(cgmath::Deg(self.pitch));
@@ -404,7 +390,7 @@ impl App {
                 label: Some("albedo render pass"),
                 color_attachments: &[
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &self.albedo_texture.view,
+                        view: &self.albedo_g_texture.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -417,7 +403,7 @@ impl App {
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &self.position_texture.view,
+                        view: &self.position_g_texture.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -430,7 +416,7 @@ impl App {
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: &self.normal_texture.view,
+                        view: &self.normal_g_texture.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -460,14 +446,15 @@ impl App {
             render_pass
                 .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.material_bind_group, &[]);
             render_pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
         }
 
         {
             let fullscreen_texture = match self.render_source {
-                RenderSource::Albedo => &self.albedo_texture,
-                RenderSource::Position => &self.position_texture,
-                RenderSource::Normal => &self.normal_texture,
+                RenderSource::Albedo => &self.albedo_g_texture,
+                RenderSource::Position => &self.position_g_texture,
+                RenderSource::Normal => &self.normal_g_texture,
             };
 
             let fullscreen_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {

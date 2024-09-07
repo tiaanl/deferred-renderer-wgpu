@@ -1,3 +1,4 @@
+use obj::TexturedVertex;
 use wgpu::util::DeviceExt;
 
 use crate::Renderer;
@@ -11,6 +12,7 @@ pub struct Vertex {
 }
 
 impl Vertex {
+    #[allow(clippy::too_many_arguments)]
     pub fn raw(x: f32, y: f32, z: f32, n_x: f32, n_y: f32, n_z: f32, u: f32, v: f32) -> Self {
         Self {
             position: [x, y, z],
@@ -27,6 +29,32 @@ pub struct Mesh {
 }
 
 impl Mesh {
+    pub fn from_reader(reader: impl std::io::BufRead) -> Result<Self, ()> {
+        // let r = BufReader::new(std::fs::File::open(path).unwrap());
+        // let obj: obj::Obj<TexturedVertex, u16> = obj::load_obj(r).unwrap();
+        let obj: obj::Obj<TexturedVertex, u16> = obj::load_obj(reader).map_err(|_| ())?;
+
+        Ok(Self {
+            vertices: obj
+                .vertices
+                .iter()
+                .map(|v| {
+                    Vertex::raw(
+                        v.position[0],
+                        v.position[1],
+                        v.position[2],
+                        v.normal[0],
+                        v.normal[1],
+                        v.normal[2],
+                        v.texture[0],
+                        v.texture[1],
+                    )
+                })
+                .collect(),
+            indices: obj.indices,
+        })
+    }
+
     pub fn upload_to_gpu(&self, renderer: &Renderer) -> GpuMesh {
         let vertex_buffer = renderer
             .device

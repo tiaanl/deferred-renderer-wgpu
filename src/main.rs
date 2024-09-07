@@ -10,6 +10,7 @@ use winit::{
 };
 
 mod app;
+mod material;
 mod mesh;
 mod mesh_render_pipeline;
 mod texture;

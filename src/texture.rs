@@ -11,7 +11,8 @@ impl Texture {
         renderer: &Renderer,
         reader: impl std::io::BufRead + std::io::Seek,
     ) -> Result<Self, ()> {
-        let img = image::load(reader, image::ImageFormat::Png).map_err(|_| ())?;
+        let img = image::load(reader, image::ImageFormat::Png)
+            .map_err(|err| println!("error: {err:?}"))?;
 
         let size = wgpu::Extent3d {
             width: img.width(),

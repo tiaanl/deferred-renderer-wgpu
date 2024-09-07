@@ -1,12 +1,10 @@
-use std::{
-    borrow::Cow,
-    io::{BufReader, Cursor},
-};
+use std::borrow::Cow;
 
 use cgmath::{Matrix, Rotation3, SquareMatrix};
 use winit::keyboard::KeyCode;
 
 use crate::{
+    material::GpuMaterial,
     mesh::{GpuMesh, Mesh},
     mesh_render_pipeline::MeshRenderPipeline,
     texture::{create_depth_texture, create_fullscreen_texture, Texture},
@@ -25,9 +23,7 @@ pub struct App {
     mesh_render_pipeline: MeshRenderPipeline,
 
     mesh: GpuMesh,
-    // albedo_texture: Texture,
-    // normal_texture: Texture,
-    material_bind_group: wgpu::BindGroup,
+    material: crate::material::GpuMaterial,
 
     albedo_g_texture: Texture,
     position_g_texture: Texture,
@@ -103,94 +99,22 @@ impl App {
             }],
         });
 
-        let albedo_texture = Texture::from_reader(
-            renderer,
-            BufReader::new(Cursor::new(include_bytes!("../res/metal/albedo.png"))),
-        )
-        .unwrap();
-
-        let normal_texture = Texture::from_reader(
-            renderer,
-            BufReader::new(Cursor::new(include_bytes!("../res/metal/normal.png"))),
-        )
-        .unwrap();
-
-        let material_bind_group_layout =
-            renderer
-                .device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("material binding group layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                    ],
-                });
-
-        let material_bind_group = renderer
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("material bind_group"),
-                layout: &material_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&albedo_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&albedo_texture.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&normal_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Sampler(&normal_texture.sampler),
-                    },
-                ],
-            });
-
-        let mesh_render_pipeline = MeshRenderPipeline::new(
-            renderer,
-            &uniforms_bind_group_layout,
-            &material_bind_group_layout,
-        );
-
         let reader =
             std::io::BufReader::new(std::io::Cursor::new(include_bytes!("../res/cube.obj")));
         let mesh = Mesh::from_reader(reader).unwrap();
         let mesh = mesh.upload_to_gpu(renderer);
+
+        let material = GpuMaterial::new(
+            renderer,
+            include_bytes!("../res/metal/albedo.png"),
+            include_bytes!("../res/metal/normal.png"),
+        );
+
+        let mesh_render_pipeline = MeshRenderPipeline::new(
+            renderer,
+            &uniforms_bind_group_layout,
+            &material.bind_group_layout,
+        );
 
         let fullscreen_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("fullscreen shader module"),
@@ -259,9 +183,7 @@ impl App {
             mesh_render_pipeline,
 
             mesh,
-            // albedo_texture,
-            // normal_texture,
-            material_bind_group,
+            material,
 
             albedo_g_texture,
             position_g_texture,
@@ -446,7 +368,7 @@ impl App {
             render_pass
                 .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.material_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.material.bind_group, &[]);
             render_pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
         }
 

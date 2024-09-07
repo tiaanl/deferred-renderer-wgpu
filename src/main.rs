@@ -10,6 +10,8 @@ use winit::{
 };
 
 mod app;
+mod mesh;
+mod mesh_render_pipeline;
 mod texture;
 
 struct Renderer {
@@ -78,16 +80,18 @@ impl ApplicationHandler for AppState {
 
         surface.configure(&device, &surface_config);
 
-        let app = app::App::new(&device, &surface_config);
+        let renderer = Renderer {
+            device,
+            queue,
+            surface,
+            surface_config,
+        };
+
+        let app = app::App::new(&renderer);
 
         *self = AppState::Initialized {
             window,
-            renderer: Renderer {
-                device,
-                queue,
-                surface,
-                surface_config,
-            },
+            renderer,
             app,
         }
     }

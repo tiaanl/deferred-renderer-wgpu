@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 
 use cgmath::{Matrix, Rotation3, SquareMatrix};
-use wgpu::util::DeviceExt;
 use winit::keyboard::KeyCode;
 
 use crate::{
-    texture::{create_depth_texture, create_fullscreen_texture, Texture, DEPTH_FORMAT},
+    mesh::{GpuMesh, Mesh, Vertex},
+    mesh_render_pipeline::MeshRenderPipeline,
+    texture::{create_depth_texture, create_fullscreen_texture, Texture},
     Renderer,
 };
 
@@ -18,10 +19,9 @@ enum RenderSource {
 pub struct App {
     depth_texture: Texture,
 
-    main_render_pipeline: wgpu::RenderPipeline,
-    main_vertex_buffer: wgpu::Buffer,
-    main_index_buffer: wgpu::Buffer,
-    main_num_indices: u32,
+    mesh_render_pipeline: MeshRenderPipeline,
+
+    mesh: GpuMesh,
 
     albedo_texture: Texture,
     position_texture: Texture,
@@ -52,7 +52,13 @@ struct Uniforms {
 }
 
 impl App {
-    pub fn new(device: &wgpu::Device, surface_config: &wgpu::SurfaceConfiguration) -> Self {
+    pub fn new(renderer: &Renderer) -> Self {
+        let Renderer {
+            device,
+            surface_config,
+            ..
+        } = renderer;
+
         let depth_texture =
             create_depth_texture(device, surface_config.width, surface_config.height);
         let albedo_texture = create_fullscreen_texture(device, surface_config, "albedo texture");
@@ -91,92 +97,63 @@ impl App {
             }],
         });
 
-        let main_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("main bind group layout"),
-            bind_group_layouts: &[&uniforms_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let mesh_render_pipeline = MeshRenderPipeline::new(renderer, &uniforms_bind_group_layout);
 
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("main shader module"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
-        });
-
-        let main_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("main pipeline"),
-            layout: Some(&main_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: "vertex_main",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 32 as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 12,
-                            shader_location: 1,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x2,
-                            offset: 24,
-                            shader_location: 2,
-                        },
-                    ],
-                }],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Cw,
-                cull_mode: Some(wgpu::Face::Front),
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: "fragment_main",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
-            }),
-            multiview: None,
-            cache: None,
-        });
+        let mut mesh = Mesh::default();
 
         const MIN: cgmath::Vector3<f32> = cgmath::vec3(-0.5, -0.5, -0.5);
         const MAX: cgmath::Vector3<f32> = cgmath::vec3(0.5, 0.5, 0.5);
 
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MIN.y, MAX.z, 0.0, 0.0, 1.0, 0.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MIN.y, MAX.z, 0.0, 0.0, 1.0, 1.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MAX.y, MAX.z, 0.0, 0.0, 1.0, 1.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MAX.y, MAX.z, 0.0, 0.0, 1.0, 0.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MAX.y, MIN.z, 0.0, 0.0, -1.0, 1.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MAX.y, MIN.z, 0.0, 0.0, -1.0, 0.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MIN.y, MIN.z, 0.0, 0.0, -1.0, 0.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MIN.y, MIN.z, 0.0, 0.0, -1.0, 1.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MIN.y, MIN.z, 1.0, 0.0, 0.0, 0.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MAX.y, MIN.z, 1.0, 0.0, 0.0, 1.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MAX.y, MAX.z, 1.0, 0.0, 0.0, 1.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MIN.y, MAX.z, 1.0, 0.0, 0.0, 0.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MIN.y, MAX.z, -1.0, 0.0, 0.0, 1.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MAX.y, MAX.z, -1.0, 0.0, 0.0, 0.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MAX.y, MIN.z, -1.0, 0.0, 0.0, 0.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MIN.y, MIN.z, -1.0, 0.0, 0.0, 1.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MAX.y, MIN.z, 0.0, 1.0, 0.0, 1.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MAX.y, MIN.z, 0.0, 1.0, 0.0, 0.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MAX.y, MAX.z, 0.0, 1.0, 0.0, 0.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MAX.y, MAX.z, 0.0, 1.0, 0.0, 1.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MIN.y, MAX.z, 0.0, -1.0, 0.0, 0.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MIN.y, MAX.z, 0.0, -1.0, 0.0, 1.0, 0.0));
+        mesh.vertices
+            .push(Vertex::raw(MIN.x, MIN.y, MIN.z, 0.0, -1.0, 0.0, 1.0, 1.0));
+        mesh.vertices
+            .push(Vertex::raw(MAX.x, MIN.y, MIN.z, 0.0, -1.0, 0.0, 0.0, 1.0));
+
+        /*
         const VERTICES: &[[f32; 8]] = &[
             // Front
             [MIN.x, MIN.y, MAX.z, 0.0, 0.0, 1.0, 0.0, 0.0], //
@@ -209,27 +186,30 @@ impl App {
             [MIN.x, MIN.y, MIN.z, 0.0, -1.0, 0.0, 1.0, 1.0], //
             [MAX.x, MIN.y, MIN.z, 0.0, -1.0, 0.0, 0.0, 1.0], //
         ];
+        */
 
-        const INDICES: &[u16] = &[
+        mesh.indices.append(&mut vec![
             0, 1, 2, 2, 3, 0, // front
             4, 5, 6, 6, 7, 4, // back
             8, 9, 10, 10, 11, 8, // right
             12, 13, 14, 14, 15, 12, // left
             16, 17, 18, 18, 19, 16, // top
             20, 21, 22, 22, 23, 20, // bottom
-        ];
+        ]);
 
-        let main_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("main index buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let mesh = mesh.upload_to_gpu(renderer);
 
-        let main_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("main index buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        // let main_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //     label: Some("main index buffer"),
+        //     contents: bytemuck::cast_slice(VERTICES),
+        //     usage: wgpu::BufferUsages::VERTEX,
+        // });
+
+        // let main_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //     label: Some("main index buffer"),
+        //     contents: bytemuck::cast_slice(INDICES),
+        //     usage: wgpu::BufferUsages::INDEX,
+        // });
 
         let fullscreen_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("fullscreen shader module"),
@@ -295,10 +275,8 @@ impl App {
 
         Self {
             depth_texture,
-            main_render_pipeline,
-            main_vertex_buffer,
-            main_index_buffer,
-            main_num_indices: INDICES.len() as u32,
+            mesh_render_pipeline,
+            mesh,
             albedo_texture,
             position_texture,
             normal_texture,
@@ -477,12 +455,12 @@ impl App {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_pipeline(&self.main_render_pipeline);
-            render_pass.set_vertex_buffer(0, self.main_vertex_buffer.slice(..));
+            render_pass.set_pipeline(&self.mesh_render_pipeline.pipeline);
+            render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
             render_pass
-                .set_index_buffer(self.main_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
-            render_pass.draw_indexed(0..self.main_num_indices, 0, 0..1);
+            render_pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
         }
 
         {

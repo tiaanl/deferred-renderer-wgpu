@@ -10,7 +10,6 @@ struct VertexOutput {
 fn vertex_main(
     @builtin(vertex_index) vertex_index: u32
 ) -> VertexOutput {
-    var output: VertexOutput;
     let tex_coord = vec2<f32>(
         f32(vertex_index >> 1u),
         f32(vertex_index & 1u)

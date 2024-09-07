@@ -1,6 +1,6 @@
 use std::{borrow::Cow, sync::Arc};
 
-use cgmath::{Rotation3, SquareMatrix};
+use cgmath::{Matrix, Rotation3, SquareMatrix};
 use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
@@ -10,6 +10,13 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::WindowId,
 };
+
+enum RenderSource {
+    Albedo,
+    Position,
+    Normal,
+    Final,
+}
 
 struct App {
     window: Arc<winit::window::Window>,
@@ -25,9 +32,11 @@ struct App {
     main_num_indices: u32,
 
     albedo_texture: Texture,
+    position_texture: Texture,
+    normal_texture: Texture,
 
     fullscreen_render_pipeline: wgpu::RenderPipeline,
-    fullscreen_bind_group: wgpu::BindGroup,
+    fullscreen_bind_group_layout: wgpu::BindGroupLayout,
 
     uniforms_buffer: wgpu::Buffer,
     _uniforms_bind_group_layout: wgpu::BindGroupLayout,
@@ -37,6 +46,8 @@ struct App {
     last_mouse_position: (f32, f32),
     yaw: f32,
     pitch: f32,
+
+    render_source: RenderSource,
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -91,6 +102,7 @@ fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> Textu
 fn create_fullscreen_texture(
     device: &wgpu::Device,
     surface_config: &wgpu::SurfaceConfiguration,
+    label: &str,
 ) -> Texture {
     let size = wgpu::Extent3d {
         width: surface_config.width,
@@ -99,7 +111,7 @@ fn create_fullscreen_texture(
     };
 
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("fullscreen_texture"),
+        label: Some(label),
         size,
         mip_level_count: 1,
         sample_count: 1,
@@ -144,6 +156,7 @@ impl App {
             self.surface_config.width as f32 / (self.surface_config.height as f32).max(0.001);
 
         let projection_matrix = cgmath::perspective(cgmath::Deg(45.0), aspect_ratio, 0.1, 1000.0);
+        let projection_inv_matrix = projection_matrix.invert().unwrap().transpose();
 
         let distance = 4.0;
         let view_matrix = {
@@ -160,20 +173,13 @@ impl App {
 
         let uniforms = Uniforms {
             projection_matrix: projection_matrix.into(),
+            projection_inv_matrix: projection_inv_matrix.into(),
             view_matrix: view_matrix.into(),
             model_matrix: model_matrix.into(),
         };
+
         self.queue
             .write_buffer(&self.uniforms_buffer, 0, bytemuck::cast_slice(&[uniforms]));
-
-        let output = self
-            .surface
-            .get_current_texture()
-            .expect("get current texture");
-
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = self
             .device
@@ -181,22 +187,55 @@ impl App {
                 label: Some("main command encoder"),
             });
 
+        let output = self
+            .surface
+            .get_current_texture()
+            .expect("get current texture");
+
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
+                label: Some("albedo render pass"),
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.albedo_texture.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.2,
+                                b: 0.3,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.position_texture.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.2,
+                                b: 0.3,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.normal_texture.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.2,
+                                b: 0.3,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_texture.view,
                     depth_ops: Some(wgpu::Operations {
@@ -215,10 +254,53 @@ impl App {
                 .set_index_buffer(self.main_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
             render_pass.draw_indexed(0..self.main_num_indices, 0, 0..1);
+        }
+
+        {
+            let fullscreen_texture = match self.render_source {
+                RenderSource::Albedo => &self.albedo_texture,
+                RenderSource::Position => &self.position_texture,
+                RenderSource::Normal => &self.normal_texture,
+                RenderSource::Final => panic!(),
+            };
+
+            let fullscreen_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("fullscreen bind group"),
+                layout: &self.fullscreen_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
+                    },
+                ],
+            });
+
+            let view = output
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fullscreen render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
             render_pass.set_pipeline(&self.fullscreen_render_pipeline);
-            render_pass.set_bind_group(0, &self.fullscreen_bind_group, &[]);
-            render_pass.draw_indexed(0..3, 0, 0..1);
+            render_pass.set_bind_group(0, &fullscreen_bind_group, &[]);
+            render_pass.draw(0..3, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -235,6 +317,7 @@ enum AppState {
 #[repr(C)]
 struct Uniforms {
     projection_matrix: [[f32; 4]; 4],
+    projection_inv_matrix: [[f32; 4]; 4],
     view_matrix: [[f32; 4]; 4],
     model_matrix: [[f32; 4]; 4],
 }
@@ -289,7 +372,10 @@ impl ApplicationHandler for AppState {
 
         surface.configure(&device, &surface_config);
 
-        let albedo_texture = create_fullscreen_texture(&device, &surface_config);
+        let albedo_texture = create_fullscreen_texture(&device, &surface_config, "albedo texture");
+        let position_texture =
+            create_fullscreen_texture(&device, &surface_config, "position texture");
+        let normal_texture = create_fullscreen_texture(&device, &surface_config, "normal texture");
 
         // Uniforms
 
@@ -389,11 +475,23 @@ impl ApplicationHandler for AppState {
                 module: &module,
                 entry_point: "fragment_main",
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
             }),
             multiview: None,
             cache: None,
@@ -484,17 +582,21 @@ impl ApplicationHandler for AppState {
                 ],
             });
 
+        // let fullscreen_texture = &albedo_texture;
+        let fullscreen_texture = &position_texture;
+        // let fullscreen_texture = &normal_texture;
+
         let fullscreen_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fullscreen bind group"),
             layout: &fullscreen_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&albedo_texture.view),
+                    resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&albedo_texture.sampler),
+                    resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
                 },
             ],
         });
@@ -517,13 +619,7 @@ impl ApplicationHandler for AppState {
                     buffers: &[],
                 },
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
+                depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &fullscreen_module,
@@ -550,9 +646,11 @@ impl ApplicationHandler for AppState {
             main_render_pipeline,
 
             albedo_texture,
+            position_texture,
+            normal_texture,
 
             fullscreen_render_pipeline,
-            fullscreen_bind_group,
+            fullscreen_bind_group_layout,
 
             main_vertex_buffer,
             main_index_buffer,
@@ -566,6 +664,8 @@ impl ApplicationHandler for AppState {
             last_mouse_position: (0.0, 0.0),
             yaw: 0.0,
             pitch: 0.0,
+
+            render_source: RenderSource::Albedo,
         })
     }
 
@@ -637,6 +737,30 @@ impl ApplicationHandler for AppState {
 
                     app.pitch = 0.0;
                     app.yaw = 0.0;
+                }
+
+                if event.physical_key == PhysicalKey::Code(KeyCode::Digit1) {
+                    let Self::Initialized(app) = self else {
+                        return;
+                    };
+
+                    app.render_source = RenderSource::Albedo;
+                }
+
+                if event.physical_key == PhysicalKey::Code(KeyCode::Digit2) {
+                    let Self::Initialized(app) = self else {
+                        return;
+                    };
+
+                    app.render_source = RenderSource::Position;
+                }
+
+                if event.physical_key == PhysicalKey::Code(KeyCode::Digit3) {
+                    let Self::Initialized(app) = self else {
+                        return;
+                    };
+
+                    app.render_source = RenderSource::Normal;
                 }
             }
 

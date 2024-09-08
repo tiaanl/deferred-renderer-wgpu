@@ -1,9 +1,10 @@
 use std::borrow::Cow;
 
-use cgmath::{Matrix, Rotation3, SquareMatrix};
+use cgmath::{Angle, Matrix, Rotation3, SquareMatrix};
 use winit::keyboard::KeyCode;
 
 use crate::{
+    lights::{Lights, PointLight},
     material::GpuMaterial,
     mesh::{GpuMesh, Mesh},
     mesh_render_pipeline::MeshRenderPipeline,
@@ -36,12 +37,16 @@ pub struct App {
     _uniforms_bind_group_layout: wgpu::BindGroupLayout,
     uniforms_bind_group: wgpu::BindGroup,
 
+    lights: Lights,
+
     rotating: Option<(f32, f32)>,
     last_mouse_position: (f32, f32),
     yaw: f32,
     pitch: f32,
 
     render_source: RenderSource,
+
+    light_angle: cgmath::Deg<f32>,
 }
 
 #[derive(Clone, Copy, bytemuck::NoUninit)]
@@ -110,10 +115,13 @@ impl App {
             include_bytes!("../res/metal/normal.png"),
         );
 
+        let lights = Lights::new(renderer, PointLight::new([3.0, 3.0, 3.0], [1.0, 1.0, 1.0]));
+
         let mesh_render_pipeline = MeshRenderPipeline::new(
             renderer,
             &uniforms_bind_group_layout,
             &material.bind_group_layout,
+            &lights.bind_group_layout,
         );
 
         let fullscreen_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -194,12 +202,16 @@ impl App {
             _uniforms_bind_group_layout: uniforms_bind_group_layout,
             uniforms_bind_group,
 
+            lights,
+
             rotating: None,
             last_mouse_position: (0.0, 0.0),
             yaw: 0.0,
             pitch: 0.0,
 
             render_source: RenderSource::Albedo,
+
+            light_angle: cgmath::Deg(0.0),
         }
     }
 
@@ -266,13 +278,18 @@ impl App {
         }
     }
 
-    pub fn render(&self, renderer: &Renderer) {
+    pub fn render(&mut self, renderer: &Renderer) {
         let Renderer {
             device,
             queue,
             surface,
             surface_config,
         } = renderer;
+
+        self.light_angle += cgmath::Deg(1.0);
+        let x = self.light_angle.cos() * 3.0;
+        let y = self.light_angle.sin() * 3.0;
+        self.lights.move_to(renderer, [x, 3.0, y]);
 
         let aspect_ratio = surface_config.width as f32 / (surface_config.height as f32).max(0.001);
 
@@ -369,6 +386,7 @@ impl App {
                 .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
             render_pass.set_bind_group(1, &self.material.bind_group, &[]);
+            render_pass.set_bind_group(2, &self.lights.bind_group, &[]);
             render_pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
         }
 

@@ -11,12 +11,17 @@ impl MeshRenderPipeline {
         renderer: &Renderer,
         uniforms_bind_group_layout: &wgpu::BindGroupLayout,
         material_bind_group_layout: &wgpu::BindGroupLayout,
+        lights_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let Renderer { device, .. } = renderer;
 
         let main_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("main bind group layout"),
-            bind_group_layouts: &[uniforms_bind_group_layout, material_bind_group_layout],
+            bind_group_layouts: &[
+                uniforms_bind_group_layout,
+                material_bind_group_layout,
+                lights_bind_group_layout,
+            ],
             push_constant_ranges: &[],
         });
 

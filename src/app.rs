@@ -1,9 +1,11 @@
 use std::borrow::Cow;
 
 use cgmath::{Angle, Matrix, Rotation3, SquareMatrix};
+use wgpu::util::DeviceExt;
 use winit::keyboard::KeyCode;
 
 use crate::{
+    gizmos::{self, Gizmo, Gizmos},
     lights::{Lights, PointLight},
     material::GpuMaterial,
     mesh::{GpuMesh, Mesh},
@@ -47,6 +49,8 @@ pub struct App {
     render_source: RenderSource,
 
     light_angle: cgmath::Deg<f32>,
+
+    gizmos: Gizmos,
 }
 
 #[derive(Clone, Copy, bytemuck::NoUninit)]
@@ -186,6 +190,51 @@ impl App {
                 cache: None,
             });
 
+        let gizmos = {
+            let mut gizmos = Gizmos::new(renderer);
+
+            let vertices = &[
+                gizmos::Vertex {
+                    position: [0.0, 0.0, 0.0],
+                    _padding: 0.0,
+                    color: [1.0, 0.0, 1.0, 1.0],
+                },
+                gizmos::Vertex {
+                    position: [1.0, 1.0, 0.0],
+                    _padding: 0.0,
+                    color: [1.0, 0.0, 1.0, 1.0],
+                },
+            ];
+
+            let indices: &[u16] = &[0, 1];
+
+            let vertex_buffer =
+                renderer
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("gizmo vertex buffer"),
+                        contents: bytemuck::cast_slice(vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+
+            let index_buffer =
+                renderer
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("gizmo index buffer"),
+                        contents: bytemuck::cast_slice(indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+
+            gizmos.gizmos.push(Gizmo {
+                vertex_buffer,
+                index_buffer,
+                index_count: indices.len() as u32,
+            });
+
+            gizmos
+        };
+
         Self {
             depth_texture,
             mesh_render_pipeline,
@@ -212,6 +261,8 @@ impl App {
             render_source: RenderSource::Albedo,
 
             light_angle: cgmath::Deg(0.0),
+
+            gizmos,
         }
     }
 
@@ -390,6 +441,10 @@ impl App {
             render_pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
         }
 
+        let surface_view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
         {
             let fullscreen_texture = match self.render_source {
                 RenderSource::Albedo => &self.albedo_g_texture,
@@ -412,14 +467,10 @@ impl App {
                 ],
             });
 
-            let view = output
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("fullscreen render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: &surface_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -435,6 +486,13 @@ impl App {
             render_pass.set_bind_group(0, &fullscreen_bind_group, &[]);
             render_pass.draw(0..3, 0..1);
         }
+
+        self.gizmos.render(
+            renderer,
+            &mut encoder,
+            &surface_view,
+            &self.depth_texture.view,
+        );
 
         queue.submit(std::iter::once(encoder.finish()));
         output.present();

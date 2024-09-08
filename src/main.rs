@@ -10,6 +10,7 @@ use winit::{
 };
 
 mod app;
+mod gizmos;
 mod lights;
 mod material;
 mod mesh;

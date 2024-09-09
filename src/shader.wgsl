@@ -56,19 +56,8 @@ struct FragmentOutput {
 
 @fragment
 fn fragment_main(vertex: VertexOutput) -> FragmentOutput {
-    // Depth
-    let depth = vertex.clip_position.z;
-
-    let light_dir = normalize(point_light.position - vertex.world_position);
-    let diffuse_strength = max(dot(vertex.world_normal, light_dir), 0.0);
-    let diffuse_color = point_light.color * diffuse_strength;
-
     // Albedo
-    let object_color: vec4<f32> = textureSample(t_albedo, s_albedo, vertex.tex_coord);
-    let ambient_strength = 0.1;
-    let ambient_color = point_light.color * ambient_strength;
-    let result = (ambient_color + diffuse_color) * object_color.xyz;
-    let albedo = vec4<f32>(result, object_color.a);
+    let albedo: vec4<f32> = textureSample(t_albedo, s_albedo, vertex.tex_coord);
 
     // Position
     let position = vec4(vertex.world_position, 1.0);
@@ -76,6 +65,5 @@ fn fragment_main(vertex: VertexOutput) -> FragmentOutput {
     // Normal
     let normal = textureSample(t_normal, s_normal, vertex.tex_coord);
 
-    // 
     return FragmentOutput(albedo, position, normal);
 }

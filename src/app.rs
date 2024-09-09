@@ -15,6 +15,7 @@ use crate::{
 };
 
 enum RenderSource {
+    Final,
     Albedo,
     Position,
     Normal,
@@ -114,6 +115,38 @@ impl App {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
             });
 
@@ -175,7 +208,7 @@ impl App {
             pitch: 0.0,
             distance: 10.0,
 
-            render_source: RenderSource::Albedo,
+            render_source: RenderSource::Final,
 
             light_angle: cgmath::Deg(0.0),
 
@@ -235,14 +268,18 @@ impl App {
             }
 
             KeyCode::Digit1 => {
-                self.render_source = RenderSource::Albedo;
+                self.render_source = RenderSource::Final;
             }
 
             KeyCode::Digit2 => {
-                self.render_source = RenderSource::Position;
+                self.render_source = RenderSource::Albedo;
             }
 
             KeyCode::Digit3 => {
+                self.render_source = RenderSource::Position;
+            }
+
+            KeyCode::Digit4 => {
                 self.render_source = RenderSource::Normal;
             }
 
@@ -361,26 +398,94 @@ impl App {
         }
 
         {
-            let fullscreen_texture = match self.render_source {
-                RenderSource::Albedo => &self.albedo_g_texture,
-                RenderSource::Position => &self.position_g_texture,
-                RenderSource::Normal => &self.normal_g_texture,
-            };
+            let fullscreen_bind_group = if matches!(self.render_source, RenderSource::Final) {
+                // let fullscreen_texture = match self.render_source {
+                //     RenderSource::Albedo => &self.albedo_g_texture,
+                //     RenderSource::Position => &self.position_g_texture,
+                //     RenderSource::Normal => &self.normal_g_texture,
+                // };
 
-            let fullscreen_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("fullscreen bind group"),
-                layout: &self.fullscreen_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
-                    },
-                ],
-            });
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("fullscreen bind group"),
+                    layout: &self.fullscreen_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(
+                                &self.albedo_g_texture.view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(
+                                &self.albedo_g_texture.sampler,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(
+                                &self.position_g_texture.view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::Sampler(
+                                &self.position_g_texture.sampler,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(
+                                &self.normal_g_texture.view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: wgpu::BindingResource::Sampler(
+                                &self.normal_g_texture.sampler,
+                            ),
+                        },
+                    ],
+                })
+            } else {
+                let fullscreen_texture = match self.render_source {
+                    RenderSource::Albedo => &self.albedo_g_texture,
+                    RenderSource::Position => &self.position_g_texture,
+                    RenderSource::Normal => &self.normal_g_texture,
+                    RenderSource::Final => unreachable!("handled above"),
+                };
+
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("fullscreen bind group"),
+                    layout: &self.fullscreen_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
+                        },
+                    ],
+                })
+            };
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("fullscreen render pass"),

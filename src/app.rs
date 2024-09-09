@@ -87,7 +87,8 @@ impl App {
 
         let reader =
             std::io::BufReader::new(std::io::Cursor::new(include_bytes!("../res/cube.obj")));
-        let mesh = Mesh::<Vertex>::from_reader(reader).unwrap();
+        let mut mesh = Mesh::<Vertex>::from_reader(reader).unwrap();
+        mesh.update_tangents();
         let mesh = mesh.upload_to_gpu(renderer);
 
         let material = GpuMaterial::new(
@@ -419,7 +420,7 @@ impl App {
 
         let aspect_ratio = surface_config.width as f32 / (surface_config.height as f32).max(0.001);
 
-        let projection_matrix = cgmath::perspective(cgmath::Deg(45.0), aspect_ratio, 0.1, 1000.0);
+        let projection_matrix = cgmath::perspective(cgmath::Deg(45.0), aspect_ratio, 0.01, 100.0);
 
         let (camera_position, view_matrix) = {
             // Calculate the camera position
@@ -452,6 +453,19 @@ impl App {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("main command encoder"),
         });
+
+        encoder.clear_texture(
+            &self.albedo_g_texture.texture,
+            &wgpu::ImageSubresourceRange::default(),
+        );
+        encoder.clear_texture(
+            &self.position_g_texture.texture,
+            &wgpu::ImageSubresourceRange::default(),
+        );
+        encoder.clear_texture(
+            &self.normal_g_texture.texture,
+            &wgpu::ImageSubresourceRange::default(),
+        );
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

@@ -9,8 +9,18 @@ pub struct GpuMaterial {
 
 impl GpuMaterial {
     pub fn new(renderer: &Renderer, albedo: &[u8], normal: &[u8]) -> Self {
-        let albedo = Texture::from_reader(renderer, BufReader::new(Cursor::new(albedo))).unwrap();
-        let normal = Texture::from_reader(renderer, BufReader::new(Cursor::new(normal))).unwrap();
+        let albedo = Texture::from_reader(
+            renderer,
+            BufReader::new(Cursor::new(albedo)),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
+        .unwrap();
+        let normal = Texture::from_reader(
+            renderer,
+            BufReader::new(Cursor::new(normal)),
+            wgpu::TextureFormat::Rgba8Unorm,
+        )
+        .unwrap();
 
         let bind_group_layout =
             renderer

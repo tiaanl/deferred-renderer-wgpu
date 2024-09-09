@@ -2,6 +2,7 @@
 struct Camera {
     projection_matrix: mat4x4<f32>,
     view_matrix: mat4x4<f32>,
+    position: vec3<f32>,
 }
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -15,6 +16,8 @@ struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) tex_coord: vec2<f32>,
+    @location(3) tangent: vec3<f32>,
+    @location(4) bitangent: vec3<f32>,
 }
 
 struct VertexOutput {
@@ -57,8 +60,8 @@ fn fragment_main(vertex: VertexOutput) -> FragmentOutput {
     let position = vec4(vertex.world_position, 1.0);
 
     // Normal
-    // let normal = textureSample(t_normal, s_normal, vertex.tex_coord);
-    let normal = vec4(vertex.world_normal, 1.0);
+    let normal = textureSample(t_normal, s_normal, vertex.tex_coord);
+    // let normal = vec4(vertex.world_normal, 1.0);
 
     return FragmentOutput(albedo, position, normal);
 }

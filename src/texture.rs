@@ -1,9 +1,7 @@
 use crate::Renderer;
 
 pub struct Texture {
-    // We access the texture through the view, but we have to
-    // keep it alive.
-    _texture: wgpu::Texture,
+    pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
 }
@@ -12,6 +10,7 @@ impl Texture {
     pub fn from_reader(
         renderer: &Renderer,
         reader: impl std::io::BufRead + std::io::Seek,
+        format: wgpu::TextureFormat,
     ) -> Result<Self, ()> {
         let img = image::load(reader, image::ImageFormat::Png)
             .map_err(|err| println!("error: {err:?}"))?;
@@ -28,7 +27,7 @@ impl Texture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -69,7 +68,7 @@ impl Texture {
         );
 
         Ok(Texture {
-            _texture: texture,
+            texture,
             view,
             sampler,
         })
@@ -112,7 +111,7 @@ pub fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> T
     });
 
     Texture {
-        _texture: texture,
+        texture,
         view,
         sampler,
     }
@@ -157,7 +156,7 @@ pub fn create_fullscreen_texture(
     });
 
     Texture {
-        _texture: texture,
+        texture,
         view,
         sampler,
     }

@@ -14,6 +14,8 @@ pub struct Camera {
 struct GpuCamera {
     projection_matrix: [[f32; 4]; 4],
     view_matrix: [[f32; 4]; 4],
+    position: [f32; 3],
+    _padding: f32,
 }
 
 impl Camera {
@@ -24,6 +26,8 @@ impl Camera {
         let data = GpuCamera {
             projection_matrix,
             view_matrix,
+            position: [0.0, 0.0, 0.0],
+            _padding: 0.0,
         };
 
         let buffer = renderer
@@ -41,7 +45,7 @@ impl Camera {
                     label: Some("camera bind group layout"),
                     entries: &[wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -74,10 +78,13 @@ impl Camera {
         renderer: &Renderer,
         projection_matrix: cgmath::Matrix4<f32>,
         view_matrix: cgmath::Matrix4<f32>,
+        camera_position: cgmath::Point3<f32>,
     ) {
         let gpu_camera = GpuCamera {
             projection_matrix: projection_matrix.into(),
             view_matrix: view_matrix.into(),
+            position: camera_position.into(),
+            _padding: 0.0,
         };
 
         renderer

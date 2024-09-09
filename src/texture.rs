@@ -36,9 +36,9 @@ impl Texture {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let sampler = renderer.device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Nearest,
@@ -121,6 +121,7 @@ pub fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> T
 pub fn create_fullscreen_texture(
     device: &wgpu::Device,
     surface_config: &wgpu::SurfaceConfiguration,
+    format: wgpu::TextureFormat,
     label: &str,
 ) -> Texture {
     let size = wgpu::Extent3d {
@@ -135,7 +136,7 @@ pub fn create_fullscreen_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
@@ -151,7 +152,7 @@ pub fn create_fullscreen_texture(
         mipmap_filter: wgpu::FilterMode::Nearest,
         lod_min_clamp: 0.0,
         lod_max_clamp: 100.0,
-        compare: None, //Some(wgpu::CompareFunction::LessEqual),
+        compare: None,
         ..Default::default()
     });
 

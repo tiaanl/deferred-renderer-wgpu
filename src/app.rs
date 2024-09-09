@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use cgmath::{Angle, Rotation3};
+use cgmath::Angle;
 use winit::keyboard::KeyCode;
 
 use crate::{
@@ -34,6 +34,7 @@ pub struct App {
     normal_g_texture: Texture,
 
     fullscreen_render_pipeline: wgpu::RenderPipeline,
+    debug_render_pipeline: wgpu::RenderPipeline,
     fullscreen_bind_group_layout: wgpu::BindGroupLayout,
 
     camera: Camera,
@@ -42,15 +43,17 @@ pub struct App {
 
     rotating: Option<(f32, f32)>,
     last_mouse_position: (f32, f32),
-    yaw: f32,
-    pitch: f32,
+    yaw: cgmath::Deg<f32>,
+    pitch: cgmath::Deg<f32>,
     distance: f32,
 
     render_source: RenderSource,
 
-    light_angle: cgmath::Deg<f32>,
+    light_angle: Option<cgmath::Deg<f32>>,
 
     gizmos: Gizmos,
+
+    last_frame_time: std::time::Instant,
 }
 
 impl App {
@@ -63,10 +66,24 @@ impl App {
 
         let depth_texture =
             create_depth_texture(device, surface_config.width, surface_config.height);
-        let albedo_g_texture = create_fullscreen_texture(device, surface_config, "albedo texture");
-        let position_g_texture =
-            create_fullscreen_texture(device, surface_config, "position texture");
-        let normal_g_texture = create_fullscreen_texture(device, surface_config, "normal texture");
+        let albedo_g_texture = create_fullscreen_texture(
+            device,
+            surface_config,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            "albedo texture",
+        );
+        let position_g_texture = create_fullscreen_texture(
+            device,
+            surface_config,
+            wgpu::TextureFormat::Rgba16Float,
+            "position texture",
+        );
+        let normal_g_texture = create_fullscreen_texture(
+            device,
+            surface_config,
+            wgpu::TextureFormat::Rgba16Float,
+            "normal texture",
+        );
 
         let reader =
             std::io::BufReader::new(std::io::Cursor::new(include_bytes!("../res/cube.obj")));
@@ -87,7 +104,6 @@ impl App {
             renderer,
             &camera.bind_group_layout,
             &material.bind_group_layout,
-            &lights.bind_group_layout,
         );
 
         let fullscreen_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -103,7 +119,7 @@ impl App {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            sample_type: wgpu::TextureSampleType::Depth,
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
                         },
@@ -112,27 +128,37 @@ impl App {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 3,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -142,7 +168,7 @@ impl App {
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
-                        binding: 5,
+                        binding: 6,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
@@ -153,7 +179,11 @@ impl App {
         let fullscreen_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("fullscreen pipeline layout"),
-                bind_group_layouts: &[&fullscreen_bind_group_layout],
+                bind_group_layouts: &[
+                    &fullscreen_bind_group_layout,
+                    &camera.bind_group_layout,
+                    &lights.bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -184,6 +214,33 @@ impl App {
                 cache: None,
             });
 
+        let debug_render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("debug render pipeline"),
+                layout: Some(&fullscreen_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &fullscreen_module,
+                    entry_point: "vertex_main",
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &fullscreen_module,
+                    entry_point: "fragment_debug",
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_config.format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
+                cache: None,
+            });
+
         let gizmos = Gizmos::new(renderer, &camera);
 
         Self {
@@ -196,7 +253,9 @@ impl App {
             albedo_g_texture,
             position_g_texture,
             normal_g_texture,
+
             fullscreen_render_pipeline,
+            debug_render_pipeline,
             fullscreen_bind_group_layout,
 
             camera,
@@ -204,15 +263,17 @@ impl App {
 
             rotating: None,
             last_mouse_position: (0.0, 0.0),
-            yaw: 0.0,
-            pitch: 0.0,
+            yaw: cgmath::Deg(90.0),
+            pitch: cgmath::Deg(0.0),
             distance: 10.0,
 
             render_source: RenderSource::Final,
 
-            light_angle: cgmath::Deg(0.0),
+            light_angle: None,
 
             gizmos,
+
+            last_frame_time: std::time::Instant::now(),
         }
     }
 
@@ -225,10 +286,24 @@ impl App {
 
         self.depth_texture =
             create_depth_texture(device, surface_config.width, surface_config.height);
-        self.albedo_g_texture = create_fullscreen_texture(device, surface_config, "albedo texture");
-        self.position_g_texture =
-            create_fullscreen_texture(device, surface_config, "position texture");
-        self.normal_g_texture = create_fullscreen_texture(device, surface_config, "normal texture");
+        self.albedo_g_texture = create_fullscreen_texture(
+            device,
+            surface_config,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            "albedo texture",
+        );
+        self.position_g_texture = create_fullscreen_texture(
+            device,
+            surface_config,
+            wgpu::TextureFormat::Rgba16Float,
+            "position texture",
+        );
+        self.normal_g_texture = create_fullscreen_texture(
+            device,
+            surface_config,
+            wgpu::TextureFormat::Rgba16Float,
+            "normal texture",
+        );
     }
 
     pub fn on_mouse_down(&mut self, button: winit::event::MouseButton) {
@@ -253,18 +328,18 @@ impl App {
         if let Some(ref mut start_drag_position) = self.rotating {
             let delta = (x - start_drag_position.0, y - start_drag_position.1);
 
-            self.yaw += delta.0;
-            self.pitch += delta.1;
+            self.yaw += cgmath::Deg(delta.0);
+            self.pitch += cgmath::Deg(delta.1);
 
             *start_drag_position = (x, y);
         }
     }
 
-    pub fn on_key_pressed(&mut self, key_code: winit::keyboard::KeyCode) {
+    pub fn on_key_pressed(&mut self, key_code: KeyCode) {
         match key_code {
             KeyCode::KeyR => {
-                self.pitch = 0.0;
-                self.yaw = 0.0;
+                self.pitch = cgmath::Deg(0.0);
+                self.yaw = cgmath::Deg(0.0);
             }
 
             KeyCode::Digit1 => {
@@ -283,9 +358,40 @@ impl App {
                 self.render_source = RenderSource::Normal;
             }
 
+            KeyCode::KeyL => {
+                if self.light_angle.is_none() {
+                    self.light_angle = Some(cgmath::Deg(0.0));
+                } else {
+                    self.light_angle = None;
+                }
+            }
+
+            KeyCode::ArrowLeft => {
+                self.lights.point_light.position[0] -= 0.5;
+            }
+            KeyCode::ArrowRight => {
+                self.lights.point_light.position[0] += 0.5;
+            }
+
+            KeyCode::ArrowUp => {
+                self.lights.point_light.position[2] += 0.5;
+            }
+            KeyCode::ArrowDown => {
+                self.lights.point_light.position[2] -= 0.5;
+            }
+
+            KeyCode::PageUp => {
+                self.lights.point_light.position[1] += 0.5;
+            }
+            KeyCode::PageDown => {
+                self.lights.point_light.position[1] -= 0.5;
+            }
+
             _ => {}
         }
     }
+
+    pub fn on_key_released(&mut self, _key_code: KeyCode) {}
 
     pub fn render(&mut self, renderer: &Renderer) {
         let Renderer {
@@ -295,28 +401,44 @@ impl App {
             surface_config,
         } = renderer;
 
-        self.light_angle += cgmath::Deg(0.1);
-        let x = self.light_angle.cos() * 10.0;
-        let y = self.light_angle.sin() * 10.0;
-        self.lights.move_to(renderer, [x, 1.0, y]);
+        let now = std::time::Instant::now();
+        let last_frame_duration = now - self.last_frame_time;
+        self.last_frame_time = now;
+
+        let time_delta = 1.0 / ((1.0 / 60.0) / last_frame_duration.as_secs_f32());
+
+        if let Some(ref mut light_angle) = self.light_angle {
+            *light_angle += cgmath::Deg(1.0 * time_delta);
+            let x = light_angle.cos() * 3.0;
+            let y = light_angle.sin() * 3.0;
+            self.lights.move_to(renderer, [x, 1.0, y]);
+        } else {
+            self.lights
+                .move_to(renderer, self.lights.point_light.position);
+        }
 
         let aspect_ratio = surface_config.width as f32 / (surface_config.height as f32).max(0.001);
 
         let projection_matrix = cgmath::perspective(cgmath::Deg(45.0), aspect_ratio, 0.1, 1000.0);
-        // let projection_inv_matrix = projection_matrix.invert().unwrap().transpose();
 
-        let view_matrix = {
-            let yaw_quat = cgmath::Quaternion::from_angle_y(cgmath::Deg(self.yaw));
-            let pitch_quat = cgmath::Quaternion::from_angle_x(cgmath::Deg(self.pitch));
-            let rotation_quat = yaw_quat * pitch_quat;
-            let rotation_matrix = cgmath::Matrix4::from(rotation_quat);
-            let translation_matrix =
-                cgmath::Matrix4::from_translation(cgmath::Vector3::new(0.0, 0.0, -self.distance));
-            translation_matrix * rotation_matrix
+        let (camera_position, view_matrix) = {
+            // Calculate the camera position
+            let camera_x = self.distance * self.yaw.cos() * self.pitch.cos();
+            let camera_y = self.distance * self.pitch.sin();
+            let camera_z = self.distance * self.yaw.sin() * self.pitch.cos();
+
+            let camera_position = cgmath::Point3::new(camera_x, camera_y, camera_z);
+
+            let target = cgmath::Point3::new(0.0, 0.0, 0.0);
+            let up = cgmath::Vector3::unit_y();
+            (
+                camera_position,
+                cgmath::Matrix4::look_at_rh(camera_position, target, up),
+            )
         };
 
         self.camera
-            .set_matrices(renderer, projection_matrix, view_matrix);
+            .set_matrices(renderer, projection_matrix, view_matrix, camera_position);
 
         self.gizmos
             .draw_axis(self.lights.point_light.position.into());
@@ -333,18 +455,13 @@ impl App {
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("albedo render pass"),
+                label: Some("gbuffer render pass"),
                 color_attachments: &[
                     Some(wgpu::RenderPassColorAttachment {
                         view: &self.albedo_g_texture.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.1,
-                                g: 0.2,
-                                b: 0.3,
-                                a: 1.0,
-                            }),
+                            load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
                     }),
@@ -352,12 +469,7 @@ impl App {
                         view: &self.position_g_texture.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.1,
-                                g: 0.2,
-                                b: 0.3,
-                                a: 1.0,
-                            }),
+                            load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
                     }),
@@ -365,12 +477,7 @@ impl App {
                         view: &self.normal_g_texture.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.1,
-                                g: 0.2,
-                                b: 0.3,
-                                a: 1.0,
-                            }),
+                            load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
                     }),
@@ -411,36 +518,40 @@ impl App {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&self.depth_texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
                             resource: wgpu::BindingResource::TextureView(
                                 &self.albedo_g_texture.view,
                             ),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 1,
+                            binding: 2,
                             resource: wgpu::BindingResource::Sampler(
                                 &self.albedo_g_texture.sampler,
                             ),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 2,
+                            binding: 3,
                             resource: wgpu::BindingResource::TextureView(
                                 &self.position_g_texture.view,
                             ),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 3,
+                            binding: 4,
                             resource: wgpu::BindingResource::Sampler(
                                 &self.position_g_texture.sampler,
                             ),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 4,
+                            binding: 5,
                             resource: wgpu::BindingResource::TextureView(
                                 &self.normal_g_texture.view,
                             ),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 5,
+                            binding: 6,
                             resource: wgpu::BindingResource::Sampler(
                                 &self.normal_g_texture.sampler,
                             ),
@@ -461,26 +572,30 @@ impl App {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
+                            resource: wgpu::BindingResource::TextureView(&self.depth_texture.view),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
+                            resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
                             resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 4,
+                            binding: 3,
                             resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
                         },
                         wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
+                        },
+                        wgpu::BindGroupEntry {
                             binding: 5,
+                            resource: wgpu::BindingResource::TextureView(&fullscreen_texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
                             resource: wgpu::BindingResource::Sampler(&fullscreen_texture.sampler),
                         },
                     ],
@@ -493,7 +608,12 @@ impl App {
                     view: &surface_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.2,
+                            b: 0.3,
+                            a: 1.0,
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -502,8 +622,14 @@ impl App {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_pipeline(&self.fullscreen_render_pipeline);
+            if matches!(self.render_source, RenderSource::Final) {
+                render_pass.set_pipeline(&self.fullscreen_render_pipeline);
+            } else {
+                render_pass.set_pipeline(&self.debug_render_pipeline);
+            }
             render_pass.set_bind_group(0, &fullscreen_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera.bind_group, &[]);
+            render_pass.set_bind_group(2, &self.lights.bind_group, &[]);
             render_pass.draw(0..3, 0..1);
         }
 

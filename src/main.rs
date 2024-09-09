@@ -187,7 +187,11 @@ impl ApplicationHandler for AppState {
                 };
 
                 if let PhysicalKey::Code(key_code) = event.physical_key {
-                    app.on_key_pressed(key_code)
+                    if event.state.is_pressed() {
+                        app.on_key_pressed(key_code);
+                    } else {
+                        app.on_key_released(key_code);
+                    }
                 }
             }
 

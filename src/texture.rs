@@ -1,7 +1,9 @@
 use crate::Renderer;
 
 pub struct Texture {
-    pub texture: wgpu::Texture,
+    // We access the texture through the view, but we have to
+    // keep it alive.
+    _texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
 }
@@ -67,7 +69,7 @@ impl Texture {
         );
 
         Ok(Texture {
-            texture,
+            _texture: texture,
             view,
             sampler,
         })
@@ -110,7 +112,7 @@ pub fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> T
     });
 
     Texture {
-        texture,
+        _texture: texture,
         view,
         sampler,
     }
@@ -154,7 +156,7 @@ pub fn create_fullscreen_texture(
     });
 
     Texture {
-        texture,
+        _texture: texture,
         view,
         sampler,
     }

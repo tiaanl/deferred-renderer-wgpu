@@ -3,9 +3,6 @@ use std::io::{BufReader, Cursor};
 use crate::{texture::Texture, Renderer};
 
 pub struct GpuMaterial {
-    pub albedo: Texture,
-    pub normal: Texture,
-
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub bind_group: wgpu::BindGroup,
 }
@@ -82,8 +79,6 @@ impl GpuMaterial {
             });
 
         Self {
-            albedo,
-            normal,
             bind_group_layout,
             bind_group,
         }

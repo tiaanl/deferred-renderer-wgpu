@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 
-use cgmath::{Angle, Matrix, Rotation3, SquareMatrix};
-use wgpu::util::DeviceExt;
+use cgmath::{Angle, Rotation3};
 use winit::keyboard::KeyCode;
 
 use crate::{
@@ -44,6 +43,7 @@ pub struct App {
     last_mouse_position: (f32, f32),
     yaw: f32,
     pitch: f32,
+    distance: f32,
 
     render_source: RenderSource,
 
@@ -173,6 +173,7 @@ impl App {
             last_mouse_position: (0.0, 0.0),
             yaw: 0.0,
             pitch: 0.0,
+            distance: 10.0,
 
             render_source: RenderSource::Albedo,
 
@@ -207,6 +208,10 @@ impl App {
         if matches!(button, winit::event::MouseButton::Left) {
             self.rotating = None;
         }
+    }
+
+    pub fn on_mouse_wheel(&mut self, delta: f32) {
+        self.distance -= delta * (self.distance * 0.1);
     }
 
     pub fn on_mouse_moved(&mut self, x: f32, y: f32) {
@@ -263,14 +268,13 @@ impl App {
         let projection_matrix = cgmath::perspective(cgmath::Deg(45.0), aspect_ratio, 0.1, 1000.0);
         // let projection_inv_matrix = projection_matrix.invert().unwrap().transpose();
 
-        let distance = 25.0;
         let view_matrix = {
             let yaw_quat = cgmath::Quaternion::from_angle_y(cgmath::Deg(self.yaw));
             let pitch_quat = cgmath::Quaternion::from_angle_x(cgmath::Deg(self.pitch));
             let rotation_quat = yaw_quat * pitch_quat;
             let rotation_matrix = cgmath::Matrix4::from(rotation_quat);
             let translation_matrix =
-                cgmath::Matrix4::from_translation(cgmath::Vector3::new(0.0, 0.0, -distance));
+                cgmath::Matrix4::from_translation(cgmath::Vector3::new(0.0, 0.0, -self.distance));
             translation_matrix * rotation_matrix
         };
 

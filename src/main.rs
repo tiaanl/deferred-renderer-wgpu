@@ -159,6 +159,20 @@ impl ApplicationHandler for AppState {
                 }
             }
 
+            WindowEvent::MouseWheel { delta, .. } => {
+                use winit::event::MouseScrollDelta;
+
+                let Self::Initialized { app, .. } = self else {
+                    return;
+                };
+
+                let delta = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y,
+                    MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                };
+                app.on_mouse_wheel(delta);
+            }
+
             WindowEvent::CursorMoved { position, .. } => {
                 let Self::Initialized { app, .. } = self else {
                     return;

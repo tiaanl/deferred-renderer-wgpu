@@ -10,6 +10,7 @@ use winit::{
 };
 
 mod app;
+mod camera;
 mod gizmos;
 mod lights;
 mod material;
@@ -40,7 +41,7 @@ impl ApplicationHandler for AppState {
                 .create_window(
                     winit::window::WindowAttributes::default()
                         .with_title("Test wGPU")
-                        .with_inner_size(LogicalSize::new(900, 600))
+                        .with_inner_size(LogicalSize::new(1600, 900))
                         .with_resizable(false),
                 )
                 .expect("create window"),

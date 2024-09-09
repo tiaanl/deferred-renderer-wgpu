@@ -1,11 +1,10 @@
-struct Uniforms {
+
+struct Camera {
     projection_matrix: mat4x4<f32>,
-    projection_inv_matrix: mat4x4<f32>,
     view_matrix: mat4x4<f32>,
-    model_matrix: mat4x4<f32>,
 }
 
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(0) var<uniform> camera: Camera;
 
 @group(1) @binding(0) var t_albedo: texture_2d<f32>;
 @group(1) @binding(1) var s_albedo: sampler;
@@ -41,10 +40,10 @@ fn vertex_main(
 
     output.world_normal = vertex.normal;
 
-    let world_position = uniforms.model_matrix * vec4(vertex.position, 1.0);
+    let world_position = /*uniforms.model_matrix */ vec4(vertex.position, 1.0);
     output.world_position = world_position.xyz;
 
-    output.clip_position = uniforms.projection_matrix * uniforms.view_matrix * world_position;
+    output.clip_position = camera.projection_matrix * camera.view_matrix * world_position;
 
     return output;
 }

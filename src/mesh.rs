@@ -23,12 +23,12 @@ impl Vertex {
 }
 
 #[derive(Default)]
-pub struct Mesh {
-    pub vertices: Vec<Vertex>,
+pub struct Mesh<V> {
+    pub vertices: Vec<V>,
     pub indices: Vec<u16>,
 }
 
-impl Mesh {
+impl Mesh<Vertex> {
     pub fn from_reader(reader: impl std::io::BufRead) -> Result<Self, ()> {
         // let r = BufReader::new(std::fs::File::open(path).unwrap());
         // let obj: obj::Obj<TexturedVertex, u16> = obj::load_obj(r).unwrap();
@@ -54,7 +54,9 @@ impl Mesh {
             indices: obj.indices,
         })
     }
+}
 
+impl<V: bytemuck::NoUninit> Mesh<V> {
     pub fn upload_to_gpu(&self, renderer: &Renderer) -> GpuMesh {
         let vertex_buffer = renderer
             .device

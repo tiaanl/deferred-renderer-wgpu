@@ -5,10 +5,11 @@ use wgpu::util::DeviceExt;
 use winit::keyboard::KeyCode;
 
 use crate::{
-    gizmos::{self, Gizmo, Gizmos},
+    camera::Camera,
+    gizmos::Gizmos,
     lights::{Lights, PointLight},
     material::GpuMaterial,
-    mesh::{GpuMesh, Mesh},
+    mesh::{GpuMesh, Mesh, Vertex},
     mesh_render_pipeline::MeshRenderPipeline,
     texture::{create_depth_texture, create_fullscreen_texture, Texture},
     Renderer,
@@ -35,9 +36,7 @@ pub struct App {
     fullscreen_render_pipeline: wgpu::RenderPipeline,
     fullscreen_bind_group_layout: wgpu::BindGroupLayout,
 
-    uniforms_buffer: wgpu::Buffer,
-    _uniforms_bind_group_layout: wgpu::BindGroupLayout,
-    uniforms_bind_group: wgpu::BindGroup,
+    camera: Camera,
 
     lights: Lights,
 
@@ -51,15 +50,6 @@ pub struct App {
     light_angle: cgmath::Deg<f32>,
 
     gizmos: Gizmos,
-}
-
-#[derive(Clone, Copy, bytemuck::NoUninit)]
-#[repr(C)]
-struct Uniforms {
-    projection_matrix: [[f32; 4]; 4],
-    projection_inv_matrix: [[f32; 4]; 4],
-    view_matrix: [[f32; 4]; 4],
-    model_matrix: [[f32; 4]; 4],
 }
 
 impl App {
@@ -77,40 +67,9 @@ impl App {
             create_fullscreen_texture(device, surface_config, "position texture");
         let normal_g_texture = create_fullscreen_texture(device, surface_config, "normal texture");
 
-        let uniforms_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("uniforms bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-
-        let uniforms_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("uniforms buffer"),
-            size: std::mem::size_of::<Uniforms>() as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("uniforms bind group"),
-            layout: &uniforms_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniforms_buffer.as_entire_binding(),
-            }],
-        });
-
         let reader =
             std::io::BufReader::new(std::io::Cursor::new(include_bytes!("../res/cube.obj")));
-        let mesh = Mesh::from_reader(reader).unwrap();
+        let mesh = Mesh::<Vertex>::from_reader(reader).unwrap();
         let mesh = mesh.upload_to_gpu(renderer);
 
         let material = GpuMaterial::new(
@@ -119,11 +78,13 @@ impl App {
             include_bytes!("../res/metal/normal.png"),
         );
 
+        let camera = Camera::new(renderer);
+
         let lights = Lights::new(renderer, PointLight::new([3.0, 3.0, 3.0], [1.0, 1.0, 1.0]));
 
         let mesh_render_pipeline = MeshRenderPipeline::new(
             renderer,
-            &uniforms_bind_group_layout,
+            &camera.bind_group_layout,
             &material.bind_group_layout,
             &lights.bind_group_layout,
         );
@@ -190,50 +151,7 @@ impl App {
                 cache: None,
             });
 
-        let gizmos = {
-            let mut gizmos = Gizmos::new(renderer);
-
-            let vertices = &[
-                gizmos::Vertex {
-                    position: [0.0, 0.0, 0.0],
-                    _padding: 0.0,
-                    color: [1.0, 0.0, 1.0, 1.0],
-                },
-                gizmos::Vertex {
-                    position: [1.0, 1.0, 0.0],
-                    _padding: 0.0,
-                    color: [1.0, 0.0, 1.0, 1.0],
-                },
-            ];
-
-            let indices: &[u16] = &[0, 1];
-
-            let vertex_buffer =
-                renderer
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("gizmo vertex buffer"),
-                        contents: bytemuck::cast_slice(vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-
-            let index_buffer =
-                renderer
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("gizmo index buffer"),
-                        contents: bytemuck::cast_slice(indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
-
-            gizmos.gizmos.push(Gizmo {
-                vertex_buffer,
-                index_buffer,
-                index_count: indices.len() as u32,
-            });
-
-            gizmos
-        };
+        let gizmos = Gizmos::new(renderer, &camera);
 
         Self {
             depth_texture,
@@ -247,10 +165,8 @@ impl App {
             normal_g_texture,
             fullscreen_render_pipeline,
             fullscreen_bind_group_layout,
-            uniforms_buffer,
-            _uniforms_bind_group_layout: uniforms_bind_group_layout,
-            uniforms_bind_group,
 
+            camera,
             lights,
 
             rotating: None,
@@ -337,17 +253,17 @@ impl App {
             surface_config,
         } = renderer;
 
-        self.light_angle += cgmath::Deg(1.0);
-        let x = self.light_angle.cos() * 3.0;
-        let y = self.light_angle.sin() * 3.0;
-        self.lights.move_to(renderer, [x, 3.0, y]);
+        self.light_angle += cgmath::Deg(0.1);
+        let x = self.light_angle.cos() * 10.0;
+        let y = self.light_angle.sin() * 10.0;
+        self.lights.move_to(renderer, [x, 1.0, y]);
 
         let aspect_ratio = surface_config.width as f32 / (surface_config.height as f32).max(0.001);
 
         let projection_matrix = cgmath::perspective(cgmath::Deg(45.0), aspect_ratio, 0.1, 1000.0);
-        let projection_inv_matrix = projection_matrix.invert().unwrap().transpose();
+        // let projection_inv_matrix = projection_matrix.invert().unwrap().transpose();
 
-        let distance = 5.0;
+        let distance = 25.0;
         let view_matrix = {
             let yaw_quat = cgmath::Quaternion::from_angle_y(cgmath::Deg(self.yaw));
             let pitch_quat = cgmath::Quaternion::from_angle_x(cgmath::Deg(self.pitch));
@@ -358,22 +274,21 @@ impl App {
             translation_matrix * rotation_matrix
         };
 
-        let model_matrix = cgmath::Matrix4::identity();
+        self.camera
+            .set_matrices(renderer, projection_matrix, view_matrix);
 
-        let uniforms = Uniforms {
-            projection_matrix: projection_matrix.into(),
-            projection_inv_matrix: projection_inv_matrix.into(),
-            view_matrix: view_matrix.into(),
-            model_matrix: model_matrix.into(),
-        };
+        self.gizmos
+            .draw_axis(self.lights.point_light.position.into());
 
-        queue.write_buffer(&self.uniforms_buffer, 0, bytemuck::cast_slice(&[uniforms]));
+        let output = surface.get_current_texture().expect("get current texture");
+
+        let surface_view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("main command encoder"),
         });
-
-        let output = surface.get_current_texture().expect("get current texture");
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -435,15 +350,11 @@ impl App {
             render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
             render_pass
                 .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.set_bind_group(0, &self.uniforms_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.camera.bind_group, &[]);
             render_pass.set_bind_group(1, &self.material.bind_group, &[]);
             render_pass.set_bind_group(2, &self.lights.bind_group, &[]);
             render_pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
         }
-
-        let surface_view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
 
         {
             let fullscreen_texture = match self.render_source {
@@ -492,9 +403,11 @@ impl App {
             &mut encoder,
             &surface_view,
             &self.depth_texture.view,
+            &self.camera,
         );
 
         queue.submit(std::iter::once(encoder.finish()));
+
         output.present();
     }
 }

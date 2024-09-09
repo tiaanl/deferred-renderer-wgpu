@@ -1,27 +1,39 @@
-use crate::{texture::DEPTH_FORMAT, Renderer};
+use wgpu::util::DeviceExt;
 
-pub struct Gizmo {
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
-    pub index_count: u32,
+use crate::{
+    camera::Camera,
+    mesh::{GpuMesh, Mesh},
+    texture::DEPTH_FORMAT,
+    Renderer,
+};
+
+#[derive(Clone, Copy, bytemuck::NoUninit)]
+#[repr(C)]
+struct Vertex {
+    position: [f32; 3],
+    _padding: f32,
+    color: [f32; 4],
+}
+
+impl Vertex {
+    fn new(position: [f32; 3], color: [f32; 4]) -> Self {
+        Self {
+            position,
+            _padding: 0.0,
+            color,
+        }
+    }
 }
 
 pub struct Gizmos {
     pipeline: wgpu::RenderPipeline,
 
-    pub gizmos: Vec<Gizmo>,
-}
-
-#[derive(Clone, Copy, bytemuck::NoUninit)]
-#[repr(C)]
-pub struct Vertex {
-    pub position: [f32; 3],
-    pub _padding: f32,
-    pub color: [f32; 4],
+    axis_mesh: GpuMesh,
+    axis: Vec<[f32; 3]>,
 }
 
 impl Gizmos {
-    pub fn new(renderer: &Renderer) -> Self {
+    pub fn new(renderer: &Renderer, camera: &Camera) -> Self {
         let module = renderer
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -36,7 +48,7 @@ impl Gizmos {
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("gizmos pipeline layout"),
-                    bind_group_layouts: &[],
+                    bind_group_layouts: &[&camera.bind_group_layout],
                     push_constant_ranges: &[],
                 });
 
@@ -49,22 +61,33 @@ impl Gizmos {
                     module: &module,
                     entry_point: "vertex_main",
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[
-                            wgpu::VertexAttribute {
+                    buffers: &[
+                        wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &[
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x3,
+                                    offset: 0,
+                                    shader_location: 0,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x4,
+                                    offset: (4 * std::mem::size_of::<f32>()) as wgpu::BufferAddress,
+                                    shader_location: 1,
+                                },
+                            ],
+                        },
+                        wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                            step_mode: wgpu::VertexStepMode::Instance,
+                            attributes: &[wgpu::VertexAttribute {
                                 format: wgpu::VertexFormat::Float32x3,
                                 offset: 0,
-                                shader_location: 0,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x3,
-                                offset: (4 * std::mem::size_of::<f32>()) as wgpu::BufferAddress,
-                                shader_location: 1,
-                            },
-                        ],
-                    }],
+                                shader_location: 2,
+                            }],
+                        },
+                    ],
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::LineList,
@@ -92,18 +115,40 @@ impl Gizmos {
                 cache: None,
             });
 
+        let axis_mesh = Mesh {
+            vertices: vec![
+                // X
+                Vertex::new([0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 1.0]),
+                Vertex::new([1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 1.0]),
+                // Y
+                Vertex::new([0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.0]),
+                Vertex::new([0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]),
+                // Z
+                Vertex::new([0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 1.0]),
+                Vertex::new([0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]),
+            ],
+            indices: vec![0, 1, 2, 3, 4, 5],
+        }
+        .upload_to_gpu(renderer);
+
         Self {
             pipeline,
-            gizmos: vec![],
+            axis_mesh,
+            axis: vec![],
         }
     }
 
+    pub fn draw_axis(&mut self, position: cgmath::Vector3<f32>) {
+        self.axis.push(position.into());
+    }
+
     pub fn render(
-        &self,
+        &mut self,
         renderer: &Renderer,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
+        camera: &Camera,
     ) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("gizmos render pass"),
@@ -118,7 +163,7 @@ impl Gizmos {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: depth_view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -127,11 +172,25 @@ impl Gizmos {
             occlusion_query_set: None,
         });
 
-        for gizmo in self.gizmos.iter() {
-            render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_vertex_buffer(0, gizmo.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(gizmo.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..gizmo.index_count, 0, 0..1);
-        }
+        let instance_buffer =
+            renderer
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("gizmos axis instances"),
+                    contents: bytemuck::cast_slice(self.axis.as_ref()),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+
+        render_pass.set_pipeline(&self.pipeline);
+        render_pass.set_vertex_buffer(0, self.axis_mesh.vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
+        render_pass.set_index_buffer(
+            self.axis_mesh.index_buffer.slice(..),
+            wgpu::IndexFormat::Uint16,
+        );
+        render_pass.set_bind_group(0, &camera.bind_group, &[]);
+        render_pass.draw_indexed(0..self.axis_mesh.index_count, 0, 0..self.axis.len() as u32);
+
+        self.axis.clear();
     }
 }

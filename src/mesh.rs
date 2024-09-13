@@ -32,6 +32,15 @@ pub struct Mesh<V> {
     pub indices: Vec<u16>,
 }
 
+impl From<epaint::Mesh> for Mesh<epaint::Vertex> {
+    fn from(value: epaint::Mesh) -> Self {
+        Self {
+            vertices: value.vertices,
+            indices: value.indices.iter().map(|i| *i as u16).collect(),
+        }
+    }
+}
+
 impl Mesh<Vertex> {
     pub fn from_reader(reader: impl std::io::BufRead) -> Result<Self, ()> {
         // let r = BufReader::new(std::fs::File::open(path).unwrap());
@@ -126,6 +135,12 @@ impl Mesh<Vertex> {
     }
 }
 
+pub struct GpuMesh {
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
+    pub index_count: u32,
+}
+
 impl<V: bytemuck::NoUninit> Mesh<V> {
     pub fn upload_to_gpu(&self, renderer: &Renderer) -> GpuMesh {
         let vertex_buffer = renderer
@@ -150,10 +165,4 @@ impl<V: bytemuck::NoUninit> Mesh<V> {
             index_count: self.indices.len() as u32,
         }
     }
-}
-
-pub struct GpuMesh {
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
-    pub index_count: u32,
 }

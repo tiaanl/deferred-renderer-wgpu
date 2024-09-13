@@ -11,7 +11,7 @@ use crate::{
     mesh::{GpuMesh, Mesh, Vertex},
     mesh_render_pipeline::MeshRenderPipeline,
     texture::{create_depth_texture, create_fullscreen_texture, Texture},
-    Renderer,
+    ui, Renderer,
 };
 
 enum RenderSource {
@@ -54,6 +54,8 @@ pub struct App {
     gizmos: Gizmos,
 
     last_frame_time: std::time::Instant,
+
+    user_interface: ui::UserInterface,
 }
 
 impl App {
@@ -244,6 +246,8 @@ impl App {
 
         let gizmos = Gizmos::new(renderer, &camera);
 
+        let user_interface = ui::UserInterface::new(renderer);
+
         Self {
             depth_texture,
             mesh_render_pipeline,
@@ -275,6 +279,8 @@ impl App {
             gizmos,
 
             last_frame_time: std::time::Instant::now(),
+
+            user_interface,
         }
     }
 
@@ -304,6 +310,11 @@ impl App {
             surface_config,
             wgpu::TextureFormat::Rgba16Float,
             "normal texture",
+        );
+
+        self.user_interface.resize(
+            renderer,
+            [surface_config.width as f32, surface_config.height as f32],
         );
     }
 
@@ -406,6 +417,15 @@ impl App {
         let last_frame_duration = now - self.last_frame_time;
         self.last_frame_time = now;
 
+        let fps = 1.0 / last_frame_duration.as_secs_f32();
+
+        self.user_interface.render_text(
+            format!("{:0.2}", fps),
+            [10.0, 10.0],
+            24.0,
+            epaint::Color32::WHITE,
+        );
+
         let time_delta = 1.0 / ((1.0 / 60.0) / last_frame_duration.as_secs_f32());
 
         if let Some(ref mut light_angle) = self.light_angle {
@@ -454,6 +474,8 @@ impl App {
             label: Some("main command encoder"),
         });
 
+        encoder.clear_texture(&output.texture, &wgpu::ImageSubresourceRange::default());
+
         encoder.clear_texture(
             &self.albedo_g_texture.texture,
             &wgpu::ImageSubresourceRange::default(),
@@ -467,7 +489,7 @@ impl App {
             &wgpu::ImageSubresourceRange::default(),
         );
 
-        {
+        if true {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("gbuffer render pass"),
                 color_attachments: &[
@@ -518,7 +540,7 @@ impl App {
             render_pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
         }
 
-        {
+        if true {
             let fullscreen_bind_group = if matches!(self.render_source, RenderSource::Final) {
                 // let fullscreen_texture = match self.render_source {
                 //     RenderSource::Albedo => &self.albedo_g_texture,
@@ -647,13 +669,30 @@ impl App {
             render_pass.draw(0..3, 0..1);
         }
 
-        self.gizmos.render(
-            renderer,
-            &mut encoder,
-            &surface_view,
-            &self.depth_texture.view,
-            &self.camera,
-        );
+        if true {
+            self.gizmos.render(
+                renderer,
+                &mut encoder,
+                &surface_view,
+                &self.depth_texture.view,
+                &self.camera,
+            );
+        }
+
+        // self.user_interface.shapes.push(epaint::ClippedShape {
+        //     clip_rect: epaint::Rect::EVERYTHING,
+        //     shape: epaint::Shape::Rect(epaint::RectShape::filled(
+        //         epaint::Rect::from_min_size(epaint::pos2(100.0, 100.0), epaint::vec2(300.0, 300.0)),
+        //         epaint::Rounding::ZERO,
+        //         epaint::Color32::BLUE,
+        //     )),
+        // });
+
+        // self.user_interface
+        //     .render_text("Hello, World!", [100.0, 100.0]);
+
+        self.user_interface
+            .render(renderer, &mut encoder, &surface_view);
 
         queue.submit(std::iter::once(encoder.finish()));
 

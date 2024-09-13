@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 bytemuck = { version = "1.17.1", features = ["derive"] }
 cgmath = "0.18.0"
+epaint = { version = "0.28.1", default-features = false, features = ["bytemuck", "default_fonts"] }
 image = { version = "0.25.2", default-features = false, features = ["png"] }
 obj-rs = "0.7.2"
 pollster = "0.3.0"

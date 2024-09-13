@@ -219,7 +219,6 @@ impl UserInterface {
         };
 
         let label = format!("egui sampler (mag: {mag_filter:?}, min: {min_filter:?})");
-        println!("creating sampler: {}", label);
 
         renderer.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some(&label),
@@ -285,8 +284,6 @@ impl UserInterface {
         };
 
         if let Some(pos) = image_delta.pos {
-            println!("updating existing texture: {:?}", texture_id);
-            // update the existing texture
             let (texture, _) = self
                 .textures
                 .get(&texture_id)
@@ -301,8 +298,6 @@ impl UserInterface {
                 origin,
             );
         } else {
-            println!("creating new texture: {:?}", texture_id);
-
             let label_str = format!("texture_{texture_id:?}");
             let label = Some(label_str.as_str());
             let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {

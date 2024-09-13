@@ -55,7 +55,7 @@ pub struct App {
 
     last_frame_time: std::time::Instant,
 
-    user_interface: ui::UserInterface,
+    ui_context: ui::UiContext,
 }
 
 impl App {
@@ -246,7 +246,21 @@ impl App {
 
         let gizmos = Gizmos::new(renderer, &camera);
 
-        let user_interface = ui::UserInterface::new(renderer);
+        let ui_context = {
+            let ui_context = ui::UiContext::new(renderer);
+
+            let label = ui::Label::new(
+                ui_context.clone(),
+                epaint::pos2(100.0, 100.0),
+                "Some label",
+                epaint::FontId::proportional(48.0),
+                epaint::Color32::LIGHT_GREEN,
+            );
+
+            ui_context.push_widget(Box::new(label));
+
+            ui_context
+        };
 
         Self {
             depth_texture,
@@ -280,7 +294,7 @@ impl App {
 
             last_frame_time: std::time::Instant::now(),
 
-            user_interface,
+            ui_context,
         }
     }
 
@@ -312,7 +326,7 @@ impl App {
             "normal texture",
         );
 
-        self.user_interface.resize(
+        self.ui_context.resize(
             renderer,
             [surface_config.width as f32, surface_config.height as f32],
         );
@@ -417,14 +431,13 @@ impl App {
         let last_frame_duration = now - self.last_frame_time;
         self.last_frame_time = now;
 
-        let fps = 1.0 / last_frame_duration.as_secs_f32();
-
-        self.user_interface.render_text(
-            format!("{:0.2}", fps),
-            [10.0, 10.0],
-            24.0,
-            epaint::Color32::WHITE,
-        );
+        // let fps = 1.0 / last_frame_duration.as_secs_f32();
+        // self.ui_context.render_text(
+        //     format!("{:0.2}", fps),
+        //     [10.0, 10.0],
+        //     24.0,
+        //     epaint::Color32::WHITE,
+        // );
 
         let time_delta = 1.0 / ((1.0 / 60.0) / last_frame_duration.as_secs_f32());
 
@@ -691,7 +704,7 @@ impl App {
         // self.user_interface
         //     .render_text("Hello, World!", [100.0, 100.0]);
 
-        self.user_interface
+        self.ui_context
             .render(renderer, &mut encoder, &surface_view);
 
         queue.submit(std::iter::once(encoder.finish()));

@@ -1,12 +1,18 @@
+use std::{cell::RefCell, rc::Rc, sync::Arc};
+
 use wgpu::util::DeviceExt;
 
 use crate::Renderer;
+
+mod widget;
+pub use widget::*;
 
 pub struct UserInterface {
     texture_manager: epaint::TextureManager,
     textures:
         std::collections::HashMap<epaint::TextureId, (Option<wgpu::Texture>, wgpu::BindGroup)>,
     samplers: std::collections::HashMap<epaint::textures::TextureOptions, wgpu::Sampler>,
+
     fonts: epaint::Fonts,
 
     screen_size_buffer: wgpu::Buffer,
@@ -17,6 +23,46 @@ pub struct UserInterface {
     pipeline: wgpu::RenderPipeline,
 
     pub shapes: Vec<epaint::ClippedShape>,
+
+    pub widgets: Vec<Box<dyn widget::Widget>>,
+}
+
+#[derive(Clone)]
+pub struct UiContext(Rc<RefCell<UserInterface>>);
+
+impl UiContext {
+    pub fn new(renderer: &Renderer) -> Self {
+        Self(Rc::new(RefCell::new(UserInterface::new(renderer))))
+    }
+
+    pub fn layout_no_wrap(
+        &self,
+        text: impl Into<String>,
+        font: epaint::FontId,
+        color: epaint::Color32,
+    ) -> Arc<epaint::Galley> {
+        self.0
+            .borrow_mut()
+            .fonts
+            .layout_no_wrap(text.into(), font, color)
+    }
+
+    pub fn push_widget(&self, widget: Box<dyn Widget>) {
+        self.0.borrow_mut().widgets.push(widget);
+    }
+
+    pub fn resize(&self, renderer: &Renderer, size: [f32; 2]) {
+        self.0.borrow_mut().resize(renderer, size);
+    }
+
+    pub fn render(
+        &self,
+        renderer: &Renderer,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+    ) {
+        self.0.borrow_mut().render(renderer, encoder, view);
+    }
 }
 
 impl UserInterface {
@@ -168,26 +214,9 @@ impl UserInterface {
             pipeline,
 
             shapes: vec![],
+
+            widgets: vec![],
         }
-    }
-
-    pub fn render_text(
-        &mut self,
-        text: impl Into<String>,
-        position: [f32; 2],
-        size: f32,
-        color: epaint::Color32,
-    ) {
-        let galley = self
-            .fonts
-            .layout_no_wrap(text.into(), epaint::FontId::monospace(size), color);
-
-        let shape = epaint::TextShape::new(epaint::pos2(position[0], position[1]), galley, color);
-
-        self.shapes.push(epaint::ClippedShape {
-            clip_rect: epaint::Rect::EVERYTHING,
-            shape: epaint::Shape::Text(shape),
-        });
     }
 
     pub fn resize(&mut self, renderer: &Renderer, size: [f32; 2]) {
@@ -348,9 +377,16 @@ impl UserInterface {
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
     ) {
+        self.fonts.begin_frame(1.0, 1024);
+
         if let Some(font_image_delta) = self.fonts.font_image_delta() {
             self.texture_manager
                 .set(epaint::TextureId::default(), font_image_delta);
+        }
+
+        for widget in self.widgets.iter() {
+            let mut shapes = widget.shapes();
+            self.shapes.append(&mut shapes);
         }
 
         let tessellation_options = epaint::TessellationOptions::default();

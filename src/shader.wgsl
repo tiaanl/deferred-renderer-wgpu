@@ -7,8 +7,8 @@ struct Camera {
 
 @group(0) @binding(0) var<uniform> camera: Camera;
 
-@group(1) @binding(0) var t_diffuse: texture_2d<f32>;
-@group(1) @binding(1) var s_diffuse: sampler;
+@group(1) @binding(0) var t_albedo: texture_2d<f32>;
+@group(1) @binding(1) var s_albedo: sampler;
 @group(1) @binding(2) var t_normal: texture_2d<f32>;
 @group(1) @binding(3) var s_normal: sampler;
 
@@ -31,18 +31,10 @@ struct VertexOutput {
 fn vertex_main(
     vertex: VertexInput,
 ) -> VertexOutput {
-    var output: VertexOutput;
-
-    output.tex_coord = vertex.tex_coord;
-
-    output.world_normal = vertex.normal;
-
     let world_position = vec4(vertex.position, 1.0);
-    output.world_position = world_position.xyz;
+    let clip_position = camera.projection_matrix * camera.view_matrix * world_position;
 
-    output.clip_position = camera.projection_matrix * camera.view_matrix * world_position;
-
-    return output;
+    return VertexOutput(clip_position, vertex.tex_coord, vertex.normal, world_position.xyz);
 }
 
 struct FragmentOutput {
@@ -53,15 +45,12 @@ struct FragmentOutput {
 
 @fragment
 fn fragment_main(vertex: VertexOutput) -> FragmentOutput {
-    // Albedo
-    let albedo: vec4<f32> = textureSample(t_diffuse, s_diffuse, vertex.tex_coord);
+    let albedo: vec4<f32> = textureSample(t_albedo, s_albedo, vertex.tex_coord);
 
-    // Position
     let position = vec4(vertex.world_position, 1.0);
 
-    // Normal
-    let normal = textureSample(t_normal, s_normal, vertex.tex_coord);
-    // let normal = vec4(vertex.world_normal, 1.0);
+    // let normal = textureSample(t_normal, s_normal, vertex.tex_coord);
+    let normal = vec4(vertex.world_normal, 1.0);
 
     return FragmentOutput(albedo, position, normal);
 }

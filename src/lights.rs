@@ -6,18 +6,28 @@ use crate::Renderer;
 #[repr(C)]
 pub struct PointLight {
     pub position: [f32; 3],
-    pub _padding1: f32,
+    pub intensity: f32,
     pub color: [f32; 3],
-    pub _padding2: f32,
+    pub shininess: f32,
+    pub ambient: f32,
+    _dummy: [f32; 3],
 }
 
 impl PointLight {
-    pub fn new(position: [f32; 3], color: [f32; 3]) -> Self {
+    pub fn new(
+        position: [f32; 3],
+        intensity: f32,
+        color: [f32; 3],
+        shininess: f32,
+        ambient: f32,
+    ) -> Self {
         Self {
             position,
-            _padding1: 0.0,
+            intensity,
             color,
-            _padding2: 0.0,
+            shininess,
+            ambient,
+            _dummy: [0.0; 3],
         }
     }
 }
@@ -75,8 +85,20 @@ impl Lights {
         }
     }
 
-    pub fn move_to(&mut self, renderer: &Renderer, position: [f32; 3]) {
+    pub fn move_to(
+        &mut self,
+        renderer: &Renderer,
+        position: [f32; 3],
+        intensity: f32,
+        color: [f32; 3],
+        shininess: f32,
+        ambient: f32,
+    ) {
         self.point_light.position = position;
+        self.point_light.intensity = intensity;
+        self.point_light.color = color;
+        self.point_light.shininess = shininess;
+        self.point_light.ambient = ambient;
         renderer
             .queue
             .write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.point_light]));

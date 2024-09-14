@@ -62,6 +62,9 @@ pub struct App {
     light_x_id: ui::SliderId,
     light_y_id: ui::SliderId,
     light_z_id: ui::SliderId,
+    intensity_id: ui::SliderId,
+    shininess_id: ui::SliderId,
+    ambient_id: ui::SliderId,
 }
 
 impl App {
@@ -94,7 +97,7 @@ impl App {
         );
 
         let reader =
-            std::io::BufReader::new(std::io::Cursor::new(include_bytes!("../res/teapot.obj")));
+            std::io::BufReader::new(std::io::Cursor::new(include_bytes!("../res/cube.obj")));
         let mut mesh = match Mesh::<Vertex>::from_reader(reader) {
             Ok(mesh) => mesh,
             Err(err) => panic!("Error: {:?}", err),
@@ -110,7 +113,10 @@ impl App {
 
         let camera = Camera::new(renderer);
 
-        let lights = Lights::new(renderer, PointLight::new([3.0, 3.0, 3.0], [1.0, 1.0, 1.0]));
+        let lights = Lights::new(
+            renderer,
+            PointLight::new([3.0, 3.0, 3.0], 1.0, [1.0, 1.0, 1.0], 10.0, 0.1),
+        );
 
         let mesh_render_pipeline = MeshRenderPipeline::new(
             renderer,
@@ -262,9 +268,21 @@ impl App {
         let light_z = ui::Slider::new(Arc::clone(&ui.fonts), "Light Z").with_min_max(-5.0, 5.0);
 
         let mut sliders = slotmap::SlotMap::with_key();
-        let light_x_key = sliders.insert(light_x);
-        let light_y_key = sliders.insert(light_y);
-        let light_z_key = sliders.insert(light_z);
+        let light_x_id = sliders.insert(light_x);
+        let light_y_id = sliders.insert(light_y);
+        let light_z_id = sliders.insert(light_z);
+        let intensity_id = sliders
+            .insert(ui::Slider::new(Arc::clone(&ui.fonts), "Intensity").with_min_max(0.1, 10.0));
+        let shininess_id = sliders.insert(
+            ui::Slider::new(Arc::clone(&ui.fonts), "Shininess")
+                .with_min_max(0.1, 100.0)
+                .with_value(10.0),
+        );
+        let ambient_id = sliders.insert(
+            ui::Slider::new(Arc::clone(&ui.fonts), "Ambient")
+                .with_min_max(0.0, 0.1)
+                .with_value(0.01),
+        );
 
         Self {
             depth_texture,
@@ -301,9 +319,12 @@ impl App {
             ui,
             sliders,
             active_slider: None,
-            light_x_id: light_x_key,
-            light_y_id: light_y_key,
-            light_z_id: light_z_key,
+            light_x_id,
+            light_y_id,
+            light_z_id,
+            intensity_id,
+            shininess_id,
+            ambient_id,
         }
     }
 
@@ -502,18 +523,48 @@ impl App {
 
         let time_delta = 1.0 / ((1.0 / 60.0) / last_frame_duration.as_secs_f32());
 
+        let intensity = self
+            .sliders
+            .get(self.intensity_id)
+            .map(|s| s.value())
+            .unwrap_or(1.0);
+
+        let shininess = self
+            .sliders
+            .get(self.shininess_id)
+            .map(|s| s.value())
+            .unwrap_or(1.0);
+
+        let ambient = self
+            .sliders
+            .get(self.ambient_id)
+            .map(|s| s.value())
+            .unwrap_or(1.0);
+
         if let Some(ref mut light_angle) = self.light_angle {
             *light_angle += cgmath::Deg(1.0 * time_delta);
             let x = light_angle.cos() * 3.0;
             let y = light_angle.sin() * 3.0;
-            self.lights.move_to(renderer, [x, 1.0, y]);
+            self.lights.move_to(
+                renderer,
+                [x, 1.0, y],
+                intensity,
+                [1.0, 1.0, 1.0],
+                shininess,
+                ambient,
+            );
         } else {
             let x = self.sliders.get(self.light_x_id).unwrap().value();
             let y = self.sliders.get(self.light_y_id).unwrap().value();
             let z = self.sliders.get(self.light_z_id).unwrap().value();
-
-            // self.lights.move_to(renderer, self.lights.point_light.position);
-            self.lights.move_to(renderer, [x, y, z]);
+            self.lights.move_to(
+                renderer,
+                [x, y, z],
+                intensity,
+                [1.0, 1.0, 1.0],
+                shininess,
+                ambient,
+            );
         }
 
         let aspect_ratio = surface_config.width as f32 / (surface_config.height as f32).max(0.001);
@@ -620,12 +671,6 @@ impl App {
 
         if true {
             let fullscreen_bind_group = if matches!(self.render_source, RenderSource::Final) {
-                // let fullscreen_texture = match self.render_source {
-                //     RenderSource::Albedo => &self.albedo_g_texture,
-                //     RenderSource::Position => &self.position_g_texture,
-                //     RenderSource::Normal => &self.normal_g_texture,
-                // };
-
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("fullscreen bind group"),
                     layout: &self.fullscreen_bind_group_layout,

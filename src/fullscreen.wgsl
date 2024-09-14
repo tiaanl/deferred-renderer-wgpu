@@ -17,7 +17,10 @@ struct Camera {
 
 struct PointLight {
     position: vec3<f32>,
+    intensity: f32,
     color: vec3<f32>,
+    shininess: f32,
+    ambient: f32,
 }
 @group(2) @binding(0) var<uniform> point_light: PointLight;
 
@@ -69,19 +72,69 @@ fn fragment_debug(vertex_output: VertexOutput) -> @location(0) vec4<f32> {
     return textureSample(t_albedo, s_albedo, vertex_output.tex_coord);
 }
 
+fn diffuse(
+    intensity: f32,
+    color: vec3<f32>,
+    direction_to_light: vec3<f32>,
+    surface_normal: vec3<f32>,
+) -> vec3<f32> {
+    let radiance = dot(direction_to_light, surface_normal);
+    return color * intensity * max(radiance, 0.0);
+}
+
+fn specular(
+    intensity: f32,
+    color: vec3<f32>,
+    direction_to_camera: vec3<f32>,
+    direction_to_light_reflected: vec3<f32>,
+    shininess: f32,
+) -> vec3<f32> {
+    let x = dot(direction_to_light_reflected, direction_to_camera);
+    let radiance = pow(x, shininess);
+    return color * intensity * max(radiance, 0.0);
+}
+
 @fragment
 fn fragment_main(vertex_output: VertexOutput) -> @location(0) vec4<f32> {
     let fullscreen_uv = vec2<i32>(floor(vertex_output.position.xy));
     let depth = textureLoad(t_depth, fullscreen_uv, 0);
+
+    if depth >= 1.0 {
+        // Black background for infinite depth.
+        return vec4(0.0, 0.0, 0.0, 1.0);
+    }
+
     let world_position = textureLoad(t_position, fullscreen_uv, 0).xyz;
-    let world_normal = textureLoad(t_normal, fullscreen_uv, 0).xyz;
+    let world_normal = normalize(textureLoad(t_normal, fullscreen_uv, 0).xyz);
 
-    let direction_to_light = point_light.position - world_position;
-    // let direction_to_camera = camera.position - world_position;
+    let direction_to_light = normalize(point_light.position - world_position);
+    let direction_to_camera = normalize(camera.position - world_position);
 
-    let diffuse = dot(world_normal, direction_to_light);
+    let material_color = vec3(0.8, 0.1, 0.1);
 
-    return vec4(diffuse, diffuse, diffuse, 1.0);
+    let diffuse = diffuse(
+        point_light.intensity,
+        material_color,
+        direction_to_light,
+        world_normal,
+    );
+
+    // Phong model
+    let r = reflect(-direction_to_light, world_normal);
+    // Blinn model
+    // let r = normalize(direction_to_light + direction_to_camera);
+
+    let specular = specular(
+        point_light.intensity,
+        material_color,
+        direction_to_camera,
+        r,
+        point_light.shininess,
+    );
+
+    let ambient = material_color * point_light.ambient;
+
+    return vec4(diffuse + specular + ambient, 1.0);
 
     /*
     let roughness = 0.1;

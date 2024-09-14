@@ -2035,6 +2035,7 @@ dependencies = [
  "image",
  "obj-rs",
  "pollster",
+ "slotmap",
  "wgpu",
  "winit",
 ]

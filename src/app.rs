@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 use cgmath::Angle;
 use winit::keyboard::KeyCode;
@@ -55,7 +55,13 @@ pub struct App {
 
     last_frame_time: std::time::Instant,
 
-    ui_context: ui::UiContext,
+    ui: ui::UserInterface,
+
+    sliders: slotmap::SlotMap<ui::SliderId, ui::Slider>,
+    active_slider: Option<ui::SliderId>,
+    light_x_id: ui::SliderId,
+    light_y_id: ui::SliderId,
+    light_z_id: ui::SliderId,
 }
 
 impl App {
@@ -246,21 +252,16 @@ impl App {
 
         let gizmos = Gizmos::new(renderer, &camera);
 
-        let ui_context = {
-            let ui_context = ui::UiContext::new(renderer);
+        let ui = ui::UserInterface::new(renderer);
 
-            let label = ui::Label::new(
-                ui_context.clone(),
-                epaint::pos2(100.0, 100.0),
-                "Some label",
-                epaint::FontId::proportional(48.0),
-                epaint::Color32::LIGHT_GREEN,
-            );
+        let light_x = ui::Slider::new(Arc::clone(&ui.fonts), "Light X").with_min_max(-5.0, 5.0);
+        let light_y = ui::Slider::new(Arc::clone(&ui.fonts), "Light Y").with_min_max(-5.0, 5.0);
+        let light_z = ui::Slider::new(Arc::clone(&ui.fonts), "Light Z").with_min_max(-5.0, 5.0);
 
-            ui_context.push_widget(Box::new(label));
-
-            ui_context
-        };
+        let mut sliders = slotmap::SlotMap::with_key();
+        let light_x_key = sliders.insert(light_x);
+        let light_y_key = sliders.insert(light_y);
+        let light_z_key = sliders.insert(light_z);
 
         Self {
             depth_texture,
@@ -294,7 +295,12 @@ impl App {
 
             last_frame_time: std::time::Instant::now(),
 
-            ui_context,
+            ui,
+            sliders,
+            active_slider: None,
+            light_x_id: light_x_key,
+            light_y_id: light_y_key,
+            light_z_id: light_z_key,
         }
     }
 
@@ -326,19 +332,51 @@ impl App {
             "normal texture",
         );
 
-        self.ui_context.resize(
+        self.ui.resize(
             renderer,
             [surface_config.width as f32, surface_config.height as f32],
         );
+
+        const SLIDER_SIZE: epaint::Vec2 = epaint::Vec2 { x: 300.0, y: 40.0 };
+        let mut top = 0.0;
+        for (_, slider) in self.sliders.iter_mut() {
+            slider.bounds = epaint::Rect {
+                min: epaint::pos2(surface_config.width as f32 - 10.0 - SLIDER_SIZE.x, top),
+                max: epaint::pos2(surface_config.width as f32 - 10.0, top + SLIDER_SIZE.y),
+            };
+            top += SLIDER_SIZE.y;
+        }
     }
 
     pub fn on_mouse_down(&mut self, button: winit::event::MouseButton) {
+        for (id, slider) in self.sliders.iter_mut() {
+            let x = self.last_mouse_position.0;
+            let y = self.last_mouse_position.1;
+            if slider.bounds.contains(epaint::pos2(x, y)) && slider.on_mouse_down(x, y) {
+                // If the widget returns true from an `on_mouse_down` event, we
+                // lock that widget as the active one and start sending `on_mouse_dragged`
+                // events instead of `on_mouse_moved` events when the mouse moves.
+                self.active_slider = Some(id);
+                return;
+            }
+        }
+
         if matches!(button, winit::event::MouseButton::Left) {
             self.rotating = Some(self.last_mouse_position);
         }
     }
 
     pub fn on_mouse_up(&mut self, button: winit::event::MouseButton) {
+        if let Some(id) = self.active_slider {
+            if let Some(ref mut slider) = self.sliders.get_mut(id) {
+                slider.on_mouse_up();
+                self.active_slider = None;
+                return;
+            }
+        }
+
+        self.active_slider = None;
+
         if matches!(button, winit::event::MouseButton::Left) {
             self.rotating = None;
         }
@@ -350,6 +388,20 @@ impl App {
 
     pub fn on_mouse_moved(&mut self, x: f32, y: f32) {
         self.last_mouse_position = (x, y);
+
+        if let Some(id) = self.active_slider {
+            if let Some(ref mut slider) = self.sliders.get_mut(id) {
+                slider.on_mouse_dragged(x, y);
+                return;
+            }
+        } else {
+            for (_, slider) in self.sliders.iter_mut() {
+                if slider.bounds.contains(epaint::pos2(x, y)) {
+                    slider.on_mouse_moved(x, y);
+                    return;
+                }
+            }
+        }
 
         if let Some(ref mut start_drag_position) = self.rotating {
             let delta = (x - start_drag_position.0, y - start_drag_position.1);
@@ -431,13 +483,19 @@ impl App {
         let last_frame_duration = now - self.last_frame_time;
         self.last_frame_time = now;
 
-        // let fps = 1.0 / last_frame_duration.as_secs_f32();
-        // self.ui_context.render_text(
-        //     format!("{:0.2}", fps),
-        //     [10.0, 10.0],
-        //     24.0,
-        //     epaint::Color32::WHITE,
-        // );
+        let fps = 1.0 / last_frame_duration.as_secs_f32();
+        self.ui.push_shape(epaint::ClippedShape {
+            clip_rect: epaint::Rect::EVERYTHING,
+            shape: epaint::Shape::Text(epaint::TextShape::new(
+                epaint::pos2(10.0, 10.0),
+                self.ui.fonts.layout_no_wrap(
+                    format!("fps: {:0.2}", fps),
+                    epaint::FontId::monospace(16.0),
+                    epaint::Color32::GREEN,
+                ),
+                epaint::Color32::default(),
+            )),
+        });
 
         let time_delta = 1.0 / ((1.0 / 60.0) / last_frame_duration.as_secs_f32());
 
@@ -447,8 +505,12 @@ impl App {
             let y = light_angle.sin() * 3.0;
             self.lights.move_to(renderer, [x, 1.0, y]);
         } else {
-            self.lights
-                .move_to(renderer, self.lights.point_light.position);
+            let x = self.sliders.get(self.light_x_id).unwrap().value();
+            let y = self.sliders.get(self.light_y_id).unwrap().value();
+            let z = self.sliders.get(self.light_z_id).unwrap().value();
+
+            // self.lights.move_to(renderer, self.lights.point_light.position);
+            self.lights.move_to(renderer, [x, y, z]);
         }
 
         let aspect_ratio = surface_config.width as f32 / (surface_config.height as f32).max(0.001);
@@ -692,20 +754,12 @@ impl App {
             );
         }
 
-        // self.user_interface.shapes.push(epaint::ClippedShape {
-        //     clip_rect: epaint::Rect::EVERYTHING,
-        //     shape: epaint::Shape::Rect(epaint::RectShape::filled(
-        //         epaint::Rect::from_min_size(epaint::pos2(100.0, 100.0), epaint::vec2(300.0, 300.0)),
-        //         epaint::Rounding::ZERO,
-        //         epaint::Color32::BLUE,
-        //     )),
-        // });
+        for (_, slider) in self.sliders.iter_mut() {
+            let shapes = slider.shapes();
+            self.ui.push_shapes(shapes);
+        }
 
-        // self.user_interface
-        //     .render_text("Hello, World!", [100.0, 100.0]);
-
-        self.ui_context
-            .render(renderer, &mut encoder, &surface_view);
+        self.ui.render(renderer, &mut encoder, &surface_view);
 
         queue.submit(std::iter::once(encoder.finish()));
 

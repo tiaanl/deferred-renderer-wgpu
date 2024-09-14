@@ -45,7 +45,9 @@ impl Mesh<Vertex> {
     pub fn from_reader(reader: impl std::io::BufRead) -> Result<Self, ()> {
         // let r = BufReader::new(std::fs::File::open(path).unwrap());
         // let obj: obj::Obj<TexturedVertex, u16> = obj::load_obj(r).unwrap();
-        let obj: obj::Obj<TexturedVertex, u16> = obj::load_obj(reader).map_err(|_| ())?;
+        let obj: obj::Obj<TexturedVertex, u16> = obj::load_obj(reader).map_err(|err| {
+            println!("ERROR: {:?}", err);
+        })?;
 
         Ok(Self {
             vertices: obj

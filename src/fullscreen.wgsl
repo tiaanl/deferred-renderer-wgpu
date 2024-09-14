@@ -71,6 +71,19 @@ fn fragment_debug(vertex_output: VertexOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn fragment_main(vertex_output: VertexOutput) -> @location(0) vec4<f32> {
+    let fullscreen_uv = vec2<i32>(floor(vertex_output.position.xy));
+    let depth = textureLoad(t_depth, fullscreen_uv, 0);
+    let world_position = textureLoad(t_position, fullscreen_uv, 0).xyz;
+    let world_normal = textureLoad(t_normal, fullscreen_uv, 0).xyz;
+
+    let direction_to_light = point_light.position - world_position;
+    // let direction_to_camera = camera.position - world_position;
+
+    let diffuse = dot(world_normal, direction_to_light);
+
+    return vec4(diffuse, diffuse, diffuse, 1.0);
+
+    /*
     let roughness = 0.1;
     let metallic = 0.1;
 
@@ -124,4 +137,5 @@ fn fragment_main(vertex_output: VertexOutput) -> @location(0) vec4<f32> {
 
     // albedo value
     // return textureSample(t_albedo, s_albedo, vertex_output.tex_coord);
+    */
 }

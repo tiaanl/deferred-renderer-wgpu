@@ -94,8 +94,11 @@ impl App {
         );
 
         let reader =
-            std::io::BufReader::new(std::io::Cursor::new(include_bytes!("../res/cube.obj")));
-        let mut mesh = Mesh::<Vertex>::from_reader(reader).unwrap();
+            std::io::BufReader::new(std::io::Cursor::new(include_bytes!("../res/teapot.obj")));
+        let mut mesh = match Mesh::<Vertex>::from_reader(reader) {
+            Ok(mesh) => mesh,
+            Err(err) => panic!("Error: {:?}", err),
+        };
         mesh.update_tangents();
         let mesh = mesh.upload_to_gpu(renderer);
 

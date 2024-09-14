@@ -45,12 +45,13 @@ struct FragmentOutput {
 
 @fragment
 fn fragment_main(vertex: VertexOutput) -> FragmentOutput {
-    let albedo: vec4<f32> = textureSample(t_albedo, s_albedo, vertex.tex_coord);
+    // let albedo: vec4<f32> = textureSample(t_albedo, s_albedo, vertex.tex_coord);
+    let albedo = vec4(0.1, 0.2, 0.3, 1.0);  // A solid color.
 
     let position = vec4(vertex.world_position, 1.0);
 
     // let normal = textureSample(t_normal, s_normal, vertex.tex_coord);
-    let normal = vec4(vertex.world_normal, 1.0);
+    let normal = vec4(vertex.world_normal, 1.0);  // Flat normals.
 
     return FragmentOutput(albedo, position, normal);
 }

@@ -85,8 +85,8 @@ impl ApplicationHandler for AppState {
             .get_default_config(&adapter, width, height)
             .expect("surface get default configuration");
         surface_config.format = format;
-        // surface_config.present_mode = wgpu::PresentMode::AutoNoVsync;
-        surface_config.present_mode = wgpu::PresentMode::AutoVsync;
+        surface_config.present_mode = wgpu::PresentMode::AutoNoVsync;
+        // surface_config.present_mode = wgpu::PresentMode::AutoVsync;
 
         surface.configure(&device, &surface_config);
 
